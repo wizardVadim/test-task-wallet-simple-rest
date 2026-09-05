@@ -41,6 +41,10 @@ const (
 	OperationTypeWithdraw OperationType = "withdraw"
 )
 
+func (operationType OperationType) IsEqual(other OperationType) bool {
+	return operationType == other
+}
+
 type WalletOperation struct {
 	walletID      WalletID
 	operationType OperationType

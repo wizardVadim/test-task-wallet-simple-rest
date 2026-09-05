@@ -1,1 +1,1 @@
-package http
+package wallet_http

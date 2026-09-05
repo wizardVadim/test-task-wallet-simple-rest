@@ -15,3 +15,5 @@ type Repository interface {
 type TxManager interface {
 	WithinTransaction(ctx context.Context, fn func(repo Repository) error) error
 }
+
+type WalletIDGenerator func() (domain.WalletID, error)

@@ -1,0 +1,262 @@
+package repository_test
+
+import (
+	"context"
+	"errors"
+	"os"
+	"sync"
+	"testing"
+	"time"
+
+	"wallet-app/internal/core/domain"
+	"wallet-app/internal/features/wallet/repository"
+	"wallet-app/internal/features/wallet/service"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+func setupRepository(t *testing.T) (context.Context, *repository.PostgresRepository, *repository.PostgresTxManager) {
+	t.Helper()
+
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set TEST_DATABASE_URL to run PostgreSQL integration tests")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+
+	t.Cleanup(cancel)
+	admin, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(admin.Close)
+	schema := pgx.Identifier{"wallet_test_" + uuid.New().String()}.Sanitize()
+	if _, err := admin.Exec(ctx, "CREATE SCHEMA "+schema); err != nil {
+		t.Fatalf("create test schema: %v", err)
+	}
+
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		if _, err := admin.Exec(cleanupCtx, "DROP SCHEMA "+schema+" CASCADE"); err != nil {
+			t.Errorf("drop test schema: %v", err)
+		}
+	})
+
+	cfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg.MaxConns = 8
+	cfg.ConnConfig.RuntimeParams["search_path"] = schema
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(pool.Close)
+	migration, err := os.ReadFile("../../../../migrations/000001_create_wallets.up.sql")
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, string(migration)); err != nil {
+		t.Fatalf("apply migration: %v", err)
+	}
+
+	return ctx, repository.NewPostgresRepository(pool), repository.NewPostgresTxManager(pool)
+}
+
+func newWalletID(t *testing.T) domain.WalletID {
+	t.Helper()
+	id, err := domain.NewWalletID(uuid.New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+func createWallet(t *testing.T, ctx context.Context, repo service.Repository) domain.WalletID {
+	t.Helper()
+	id := newWalletID(t)
+	if _, err := repo.CreateNewWallet(ctx, id); err != nil {
+		t.Fatalf("create wallet: %v", err)
+	}
+	return id
+}
+
+func withBalance(t *testing.T, id domain.WalletID, balance int64) domain.Wallet {
+	t.Helper()
+	wallet, err := domain.NewWallet(id, balance)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return wallet
+}
+
+func assertBalance(t *testing.T, ctx context.Context, repo service.Repository, id domain.WalletID, want int64) {
+	t.Helper()
+	got, err := repo.GetWalletBalance(ctx, id)
+	if err != nil {
+		t.Fatalf("get balance: %v", err)
+	}
+	if got != want {
+		t.Fatalf("balance = %d; want %d", got, want)
+	}
+}
+
+func TestCreateNewWallet(t *testing.T) {
+	ctx, repo, _ := setupRepository(t)
+	id := newWalletID(t)
+	wallet, err := repo.CreateNewWallet(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wallet.ID() != id || wallet.Balance() != 0 {
+		t.Fatalf("unexpected wallet: %+v", wallet)
+	}
+	assertBalance(t, ctx, repo, id, 0)
+}
+
+func TestGetWalletBalance(t *testing.T) {
+	ctx, repo, manager := setupRepository(t)
+	id := createWallet(t, ctx, repo)
+	if err := repo.UpdateBalance(ctx, withBalance(t, id, 125)); err != nil {
+		t.Fatal(err)
+	}
+	assertBalance(t, ctx, repo, id, 125)
+	err := manager.WithinTransaction(ctx, func(txRepo service.Repository) error {
+		balance, err := txRepo.GetWalletBalanceForUpdate(ctx, id)
+		if err != nil {
+			return err
+		}
+		if balance != 125 {
+			t.Errorf("locked balance = %d; want 125", balance)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUpdateBalance(t *testing.T) {
+	ctx, repo, _ := setupRepository(t)
+	id := createWallet(t, ctx, repo)
+	for _, balance := range []int64{100, 0} {
+		if err := repo.UpdateBalance(ctx, withBalance(t, id, balance)); err != nil {
+			t.Fatal(err)
+		}
+		assertBalance(t, ctx, repo, id, balance)
+	}
+}
+
+func TestWalletNotFound(t *testing.T) {
+	ctx, repo, manager := setupRepository(t)
+	id := newWalletID(t)
+	tests := []struct {
+		name string
+		run  func() error
+	}{
+		{"read", func() error { _, err := repo.GetWalletBalance(ctx, id); return err }},
+		{"read for update", func() error {
+			return manager.WithinTransaction(ctx, func(txRepo service.Repository) error {
+				_, err := txRepo.GetWalletBalanceForUpdate(ctx, id)
+				return err
+			})
+		}},
+		{"update", func() error { return repo.UpdateBalance(ctx, withBalance(t, id, 100)) }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.run(); !errors.Is(err, domain.ErrWalletNotFound) {
+				t.Fatalf("error = %v; want ErrWalletNotFound", err)
+			}
+		})
+	}
+}
+
+func TestCreateDuplicateWallet(t *testing.T) {
+	ctx, repo, _ := setupRepository(t)
+	id := createWallet(t, ctx, repo)
+	if err := repo.UpdateBalance(ctx, withBalance(t, id, 100)); err != nil {
+		t.Fatal(err)
+	}
+	_, err := repo.CreateNewWallet(ctx, id)
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23505" {
+		t.Fatalf("error = %v; want unique violation", err)
+	}
+	assertBalance(t, ctx, repo, id, 100)
+}
+
+func TestTransactionCommit(t *testing.T) {
+	ctx, repo, manager := setupRepository(t)
+	id := createWallet(t, ctx, repo)
+	wallet := withBalance(t, id, 100)
+	if err := manager.WithinTransaction(ctx, func(txRepo service.Repository) error {
+		return txRepo.UpdateBalance(ctx, wallet)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	assertBalance(t, ctx, repo, id, 100)
+}
+
+func TestTransactionRollback(t *testing.T) {
+	ctx, repo, manager := setupRepository(t)
+	id := createWallet(t, ctx, repo)
+	wallet := withBalance(t, id, 100)
+	expectedErr := errors.New("callback failed")
+	err := manager.WithinTransaction(ctx, func(txRepo service.Repository) error {
+		if err := txRepo.UpdateBalance(ctx, wallet); err != nil {
+			return err
+		}
+		return expectedErr
+	})
+	if !errors.Is(err, expectedErr) {
+		t.Fatalf("error = %v; want callback error", err)
+	}
+	assertBalance(t, ctx, repo, id, 0)
+}
+
+func TestConcurrentWalletUpdates(t *testing.T) {
+	ctx, repo, manager := setupRepository(t)
+	id := createWallet(t, ctx, repo)
+	const operations = 40
+	start := make(chan struct{})
+	results := make(chan error, operations)
+	var workers sync.WaitGroup
+	for i := 0; i < operations; i++ {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			<-start
+			results <- manager.WithinTransaction(ctx, func(txRepo service.Repository) error {
+				balance, err := txRepo.GetWalletBalanceForUpdate(ctx, id)
+				if err != nil {
+					return err
+				}
+				wallet, err := domain.NewWallet(id, balance+1)
+				if err != nil {
+					return err
+				}
+				return txRepo.UpdateBalance(ctx, wallet)
+			})
+		}()
+	}
+	close(start)
+	workers.Wait()
+	close(results)
+	for err := range results {
+		if err != nil {
+			t.Errorf("concurrent update: %v", err)
+		}
+	}
+	assertBalance(t, ctx, repo, id, operations)
+}

@@ -1,5 +1,70 @@
 # test-task-wallet-simple-rest
 
+## API
+
+#### GET /api/v1/wallets/{wallet_uuid}
+
+Response body:
+
+```json
+{
+    "payload": {
+        "balance:" 1000
+    }
+}
+```
+
+#### POST /api/v1/wallets
+
+Response body:
+
+```json
+{
+    "payload": {
+        "walletId": "63e8c3d9-e907-4739-b2d0-6c751a887b4a",
+        "balance": 0
+    }
+}
+```
+
+#### POST /api/v1/wallet
+
+Request body:
+
+```json
+{
+    "walletId": "63e8c3d9-e907-4739-b2d0-6c751a887b4a",
+    "operationType": "DEPOSIT", // WITHDRAW
+    "amount": 1000
+}
+```
+
+## Error responses
+
+All API errors use the following response format:
+
+```json
+{
+    "error": {
+        "message": "wallet not found"
+    }
+}
+```
+
+The API may return the following errors:
+
+| HTTP Status | Message | Description |
+|---|---|---|
+| `400 Bad Request` | `invalid wallet id` | Wallet ID is not a valid UUID |
+| `400 Bad Request` | `invalid request body` | Request body is invalid |
+| `400 Bad Request` | `request body too large` | Request body exceeds the allowed size |
+| `404 Not Found` | `wallet not found` | Wallet does not exist |
+| `409 Conflict` | `insufficient funds` | Withdrawal amount exceeds the current balance |
+| `409 Conflict` | `balance overflow` | Deposit would overflow the wallet balance |
+| `500 Internal Server Error` | `couldn't get wallet balance` | Internal error while retrieving the balance |
+| `500 Internal Server Error` | `couldn't create a new wallet` | Internal error while creating a wallet |
+| `500 Internal Server Error` | `couldn't change wallet balance` | Internal error while changing the balance |
+
 ## Start
 
 ```bash

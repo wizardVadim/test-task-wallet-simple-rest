@@ -85,6 +85,12 @@ or
 make docker-stop
 ```
 
+## Rebuild
+
+```bash
+make docker-rebuild
+```
+
 ## Tests
 ```bash
 make local-test-go

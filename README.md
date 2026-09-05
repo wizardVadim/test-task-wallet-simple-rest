@@ -46,3 +46,24 @@ Each test applies the project migration in a separate schema and cleans it up af
 These tests do not use `config.env` or the development database.
 
 `make local-test-go` skips these tests unless `TEST_DATABASE_URL` is set.
+
+## Load testing
+
+The API was tested with Vegeta against a single wallet.
+
+Test parameters:
+
+- Rate: 1000 requests/sec
+- Duration: 30 seconds
+- Total requests: 30,000
+- Success rate: 100%
+- HTTP 200 responses: 30,000
+- p95 latency: ~3.24s
+- p99 latency: ~3.62s
+
+All requests were performed against the same wallet to verify
+correctness under concurrent balance updates.
+
+After 30,000 successful DEPOSIT operations with amount=1,
+the wallet balance increased exactly by 30,000, confirming
+that no updates were lost.

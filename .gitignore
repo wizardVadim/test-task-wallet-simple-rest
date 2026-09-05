@@ -1,2 +1,5 @@
 # Environment
 config.env
+
+# Internal data
+/out/

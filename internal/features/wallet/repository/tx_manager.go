@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// deprecated
 type PostgresTxManager struct {
 	pool *pgxpool.Pool
 }

@@ -1,0 +1,1 @@
+GET http://localhost:8080/api/v1/wallets/2b616c65-b4bd-49ef-b31e-4a64e6476b37

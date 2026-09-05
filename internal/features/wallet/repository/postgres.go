@@ -120,3 +120,48 @@ func (r *PostgresRepository) UpdateBalance(ctx context.Context, wallet domain.Wa
 
 	return nil
 }
+
+func (r *PostgresRepository) ApplyOperation(ctx context.Context, operation domain.WalletOperation) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	var query string
+	var errBalanceCheck error
+
+	switch operation.OperationType() {
+	case domain.OperationTypeDeposit:
+		query = `
+            UPDATE wallets 
+            SET balance = balance + $1 
+            WHERE id = $2 AND (9223372036854775807 - balance >= $1)
+        `
+		errBalanceCheck = ErrBalanceOverflow
+
+	case domain.OperationTypeWithdraw:
+		query = `
+            UPDATE wallets 
+            SET balance = balance - $1 
+            WHERE id = $2 AND balance >= $1
+        `
+		errBalanceCheck = ErrSmallBalance
+	default:
+		return domain.ErrInvalidOperationType
+	}
+
+	tag, err := r.db.Exec(ctx, query, operation.Amount(), operation.WalletID().Value())
+	if err != nil {
+		return fmt.Errorf("apply wallet operation: %w", err)
+	}
+
+	if tag.RowsAffected() == 0 {
+		var exists bool
+		checkErr := r.db.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM wallets WHERE id=$1)", operation.WalletID().Value()).Scan(&exists)
+		if checkErr == nil && !exists {
+			return domain.ErrWalletNotFound
+		}
+		return errBalanceCheck
+	}
+
+	return nil
+}

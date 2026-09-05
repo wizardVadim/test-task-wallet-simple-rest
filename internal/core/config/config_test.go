@@ -11,7 +11,7 @@ import (
 func setValidEnv(t *testing.T) {
 	t.Helper()
 	for key, value := range map[string]string{
-		"HTTP_ADDR":         ":8080",
+		"HTTP_ADDR":         "8080",
 		"POSTGRES_HOST":     "localhost",
 		"POSTGRES_PORT":     "5432",
 		"POSTGRES_USER":     "test_user",
@@ -30,7 +30,7 @@ func TestLoad(t *testing.T) {
 		t.Fatalf("Load() error = %v", err)
 	}
 	want := config.Config{
-		HTTPAddr: ":8080",
+		HTTPAddr: "8080",
 		DB: config.DBConfig{
 			Host:     "localhost",
 			Port:     "5432",

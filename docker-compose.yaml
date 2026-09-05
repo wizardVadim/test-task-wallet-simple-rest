@@ -27,10 +27,16 @@ services:
       - "-path"
       - "/migrations"
       - "-database"
-      - "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:${POSTGRES_PORT}/bank?sslmode=disable"
+      - "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_NAME}?sslmode=disable"
       - "up"
 
-# Добавить сервису зависимость от запуска миграций
-    # depends_on:
-    #   migrate:
-    #     condition: service_completed_successfully
+  wallet:
+    build: .
+    image: wallet-app:local
+    env_file:
+      - config.env
+    ports:
+      - "${HTTP_PORT}:${HTTP_ADDR}"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully

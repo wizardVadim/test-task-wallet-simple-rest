@@ -72,32 +72,6 @@ func (r *PostgresRepository) GetWalletBalance(ctx context.Context, walletID doma
 	return balance, nil
 }
 
-func (r *PostgresRepository) GetWalletBalanceForUpdate(ctx context.Context, walletID domain.WalletID) (int64, error) {
-	if err := ctx.Err(); err != nil {
-		return 0, err
-	}
-
-	queryRow := `
-		SELECT balance 
-		FROM wallets
-		WHERE id=$1
-		FOR UPDATE;
-	`
-
-	var balance int64
-
-	err := r.db.QueryRow(ctx, queryRow, walletID.Value()).Scan(&balance)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return 0, domain.ErrWalletNotFound
-		}
-
-		return 0, fmt.Errorf("get wallet balance for update: %w", err)
-	}
-
-	return balance, nil
-}
-
 func (r *PostgresRepository) UpdateBalance(ctx context.Context, wallet domain.Wallet) error {
 	if err := ctx.Err(); err != nil {
 		return err

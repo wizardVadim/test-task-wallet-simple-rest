@@ -7,14 +7,12 @@ import (
 
 type Service struct {
 	repo              Repository
-	txManager         TxManager
 	walletIDGenerator WalletIDGenerator
 }
 
-func New(repository Repository, manager TxManager, walletIDGenerator WalletIDGenerator) *Service {
+func New(repository Repository, walletIDGenerator WalletIDGenerator) *Service {
 	return &Service{
 		repo:              repository,
-		txManager:         manager,
 		walletIDGenerator: walletIDGenerator,
 	}
 }

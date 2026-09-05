@@ -35,7 +35,15 @@ func Run() error {
 		Path:   "/" + config.DB.Name,
 	}
 
-	pool, err := pgxpool.New(ctx, connectionString.String())
+	poolConfig, err := pgxpool.ParseConfig(connectionString.String())
+	if err != nil {
+		return err
+	}
+
+	poolConfig.MaxConns = 50
+	poolConfig.MinConns = 10
+
+	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {
 		return err
 	}
@@ -45,10 +53,9 @@ func Run() error {
 		return fmt.Errorf("ping database: %w", err)
 	}
 
-	walletTxManager := repository.NewPostgresTxManager(pool)
 	walletRepository := repository.NewPostgresRepository(pool)
 
-	walletService := service.New(walletRepository, walletTxManager, service.GenerateWalletID)
+	walletService := service.New(walletRepository, service.GenerateWalletID)
 
 	walletHandler := wallet_http.New(walletService)
 
@@ -63,7 +70,7 @@ func Run() error {
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       5 * time.Second,
-		WriteTimeout:      10 * time.Second,
+		WriteTimeout:      20 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
 

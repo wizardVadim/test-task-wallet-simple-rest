@@ -27,7 +27,7 @@ services:
       - "-path"
       - "/migrations"
       - "-database"
-      - "postgres://${POSTGRESQL_USER}:${POSTGRESQL_PASSWORD}@db:${POSTGRES_PORT}/bank?sslmode=disable"
+      - "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:${POSTGRES_PORT}/bank?sslmode=disable"
       - "up"
 
 # Добавить сервису зависимость от запуска миграций

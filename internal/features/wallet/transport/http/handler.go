@@ -21,6 +21,7 @@ func New(walletService WalletService) *Handler {
 	return &Handler{walletService: walletService}
 }
 
+// GET /api/v1/wallets{wallet_uuid}
 func (h *Handler) GetWalletBalance(w http.ResponseWriter, r *http.Request) {
 	if r.Context().Err() != nil {
 		return
@@ -66,6 +67,7 @@ func (h *Handler) GetWalletBalance(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// POST /api/v1/wallets
 func (h *Handler) CreateWallet(w http.ResponseWriter, r *http.Request) {
 	if r.Context().Err() != nil {
 		return
@@ -94,6 +96,15 @@ func (h *Handler) CreateWallet(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// POST /api/v1/wallet
+//
+// request body:
+//
+//	{
+//		"walletID": "9c2d217e-96d3-4117-9f0b-3952c4dc6ec2",
+//		"operationType": "DEPOSIT",
+//		"amount": 1000
+//	}
 func (h *Handler) ChangeWalletBalance(w http.ResponseWriter, r *http.Request) {
 	if r.Context().Err() != nil {
 		return
@@ -222,7 +233,7 @@ func (h *Handler) ChangeWalletBalance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, ResponseDTO{})
+	w.WriteHeader(http.StatusOK)
 }
 
 func writeJSON(w http.ResponseWriter, status int, response ResponseDTO) {

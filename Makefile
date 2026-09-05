@@ -17,7 +17,12 @@ docker-start:
 	@docker compose --env-file config.env up -d
 
 docker-stop:
-	@docker compose down
+	@docker compose --env-file config.env down
+
+.PHONY: docker-rebuild
+
+docker-rebuild:
+	@docker compose --env-file config.env up -d --build wallet
 
 TEST_COMPOSE = docker compose -f docker-compose.test.yaml
 
@@ -31,3 +36,6 @@ integration-test:
 	test_address=$$($(TEST_COMPOSE) port db 5432); \
 	TEST_DATABASE_URL="postgres://test_user:test_password@$$test_address/wallet_test?sslmode=disable" \
 		go test -count=1 -v ./internal/features/wallet/repository
+
+load-test-add-balance:
+	vegeta attack -targets=./loadtests/vegeta_targets.txt -rate=1000 -duration=30s | vegeta report

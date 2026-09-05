@@ -1,0 +1,3 @@
+POST http://localhost:8080/api/v1/wallet
+Content-Type: application/json
+@./loadtests/vegeta-add-balance-body.json

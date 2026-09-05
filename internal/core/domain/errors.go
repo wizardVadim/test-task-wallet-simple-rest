@@ -7,4 +7,5 @@ var (
 	ErrInvalidOperationType        = errors.New("invalid operation type")
 	ErrAmountMustBePositive        = errors.New("amount below zero or equals zero")
 	ErrBalanceMustBePositiveOrZero = errors.New("balance below zero")
+	ErrWalletNotFound              = errors.New("wallet not found")
 )

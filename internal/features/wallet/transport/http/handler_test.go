@@ -292,9 +292,18 @@ func TestChangeWalletBalance(t *testing.T) {
 			if calls != tt.calls {
 				t.Fatalf("service calls = %d; want %d", calls, tt.calls)
 			}
-			body := checkJSONResponse(t, response, tt.status, tt.message)
-			if tt.message == "" && string(body["payload"]) != "null" {
-				t.Fatalf("unexpected payload: %s", body["payload"])
+			if tt.message != "" {
+				checkJSONResponse(t, response, tt.status, tt.message)
+				return
+			}
+			if response.Code != tt.status {
+				t.Fatalf("status = %d; want %d", response.Code, tt.status)
+			}
+			if response.Body.Len() != 0 {
+				t.Fatalf("unexpected response body: %s", response.Body.String())
+			}
+			if got := response.Header().Get("Content-Type"); got != "" {
+				t.Fatalf("unexpected Content-Type: %q", got)
 			}
 		})
 	}

@@ -11,9 +11,4 @@ type Repository interface {
 	ApplyOperation(ctx context.Context, operation domain.WalletOperation) error
 }
 
-// deprecated
-type TxManager interface {
-	WithinTransaction(ctx context.Context, fn func(repo Repository) error) error
-}
-
 type WalletIDGenerator func() (domain.WalletID, error)

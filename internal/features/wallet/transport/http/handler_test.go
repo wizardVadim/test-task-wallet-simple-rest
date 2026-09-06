@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"wallet-app/internal/features/wallet/service"
 
 	"github.com/google/uuid"
 
@@ -265,8 +264,8 @@ func TestChangeWalletBalance(t *testing.T) {
 		{name: "oversized first value", body: `{"walletId":"` + strings.Repeat("a", 4096) + `"}`, status: 413, message: ErrorRequestBodyTooLarge},
 		{name: "oversized trailing whitespace", body: valid + strings.Repeat(" ", 4097-len(valid)), status: 413, message: ErrorRequestBodyTooLarge},
 		{name: "not found", body: valid, err: fmt.Errorf("change: %w", domain.ErrWalletNotFound), status: 404, calls: 1, message: ErrorWalletNotFound},
-		{name: "insufficient funds", body: valid, err: fmt.Errorf("change: %w", service.ErrSmallBalance), status: 409, calls: 1, message: ErrorInsufficientFunds},
-		{name: "balance overflow", body: valid, err: fmt.Errorf("change: %w", service.ErrBalanceOverflow), status: 422, calls: 1, message: ErrorBalanceOverflow},
+		{name: "insufficient funds", body: valid, err: fmt.Errorf("change: %w", domain.ErrSmallBalance), status: 409, calls: 1, message: ErrorInsufficientFunds},
+		{name: "balance overflow", body: valid, err: fmt.Errorf("change: %w", domain.ErrBalanceOverflow), status: 422, calls: 1, message: ErrorBalanceOverflow},
 		{name: "internal error", body: valid, err: errors.New("private database details"), status: 500, calls: 1, message: ErrorChangeBalanceInternal},
 	}
 	for _, tt := range tests {

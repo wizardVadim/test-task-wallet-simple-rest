@@ -72,29 +72,6 @@ func (r *PostgresRepository) GetWalletBalance(ctx context.Context, walletID doma
 	return balance, nil
 }
 
-func (r *PostgresRepository) UpdateBalance(ctx context.Context, wallet domain.Wallet) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-
-	queryRow := `
-		UPDATE wallets
-		SET balance=$1
-		WHERE id=$2
-	`
-
-	tag, err := r.db.Exec(ctx, queryRow, wallet.Balance(), wallet.ID().Value())
-	if err != nil {
-		return fmt.Errorf("update wallet balance: %w", err)
-	}
-
-	if tag.RowsAffected() == 0 {
-		return domain.ErrWalletNotFound
-	}
-
-	return nil
-}
-
 func (r *PostgresRepository) ApplyOperation(ctx context.Context, operation domain.WalletOperation) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -110,7 +87,7 @@ func (r *PostgresRepository) ApplyOperation(ctx context.Context, operation domai
             SET balance = balance + $1 
             WHERE id = $2 AND (9223372036854775807 - balance >= $1)
         `
-		errBalanceCheck = ErrBalanceOverflow
+		errBalanceCheck = domain.ErrBalanceOverflow
 
 	case domain.OperationTypeWithdraw:
 		query = `
@@ -118,7 +95,7 @@ func (r *PostgresRepository) ApplyOperation(ctx context.Context, operation domai
             SET balance = balance - $1 
             WHERE id = $2 AND balance >= $1
         `
-		errBalanceCheck = ErrSmallBalance
+		errBalanceCheck = domain.ErrSmallBalance
 	default:
 		return domain.ErrInvalidOperationType
 	}
@@ -131,7 +108,10 @@ func (r *PostgresRepository) ApplyOperation(ctx context.Context, operation domai
 	if tag.RowsAffected() == 0 {
 		var exists bool
 		checkErr := r.db.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM wallets WHERE id=$1)", operation.WalletID().Value()).Scan(&exists)
-		if checkErr == nil && !exists {
+		if checkErr != nil {
+			return fmt.Errorf("check wallet existence: %w", checkErr)
+		}
+		if !exists {
 			return domain.ErrWalletNotFound
 		}
 		return errBalanceCheck

@@ -92,15 +92,6 @@ func createWallet(t *testing.T, ctx context.Context, repo service.Repository) do
 	return id
 }
 
-func withBalance(t *testing.T, id domain.WalletID, balance int64) domain.Wallet {
-	t.Helper()
-	wallet, err := domain.NewWallet(id, balance)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return wallet
-}
-
 func withOperation(t *testing.T, id domain.WalletID, operationType domain.OperationType, amount int64) domain.WalletOperation {
 	t.Helper()
 	operation, err := domain.NewWalletOperation(id, operationType, amount)
@@ -295,7 +286,7 @@ func TestApplyOperation(t *testing.T) {
 			operationType: domain.OperationTypeDeposit,
 			amount:        1,
 			wantBalance:   math.MaxInt64,
-			wantErr:       repository.ErrBalanceOverflow,
+			wantErr:       domain.ErrBalanceOverflow,
 		},
 		{
 			name:          "insufficient funds",
@@ -303,7 +294,7 @@ func TestApplyOperation(t *testing.T) {
 			operationType: domain.OperationTypeWithdraw,
 			amount:        101,
 			wantBalance:   100,
-			wantErr:       repository.ErrSmallBalance,
+			wantErr:       domain.ErrSmallBalance,
 		},
 		{
 			name:          "wallet not found",
@@ -324,9 +315,9 @@ func TestApplyOperation(t *testing.T) {
 				id = createWallet(t, ctx, repo)
 
 				if tt.initial != 0 {
-					if err := repo.UpdateBalance(
+					if err := repo.ApplyOperation(
 						ctx,
-						withBalance(t, id, tt.initial),
+						withOperation(t, id, domain.OperationTypeDeposit, tt.initial),
 					); err != nil {
 						t.Fatal(err)
 					}

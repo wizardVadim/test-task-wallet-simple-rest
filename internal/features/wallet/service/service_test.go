@@ -40,12 +40,6 @@ func (r *repositoryStub) ApplyOperation(ctx context.Context, operation domain.Wa
 	return r.apply(ctx, operation)
 }
 
-type txManagerStub func(context.Context, func(service.Repository) error) error
-
-func (fn txManagerStub) WithinTransaction(ctx context.Context, callback func(service.Repository) error) error {
-	return fn(ctx, callback)
-}
-
 func mustWalletID(t *testing.T) domain.WalletID {
 	t.Helper()
 	id, err := domain.NewWalletID(uuid.New())
@@ -184,14 +178,14 @@ func TestChangeWalletBalance(t *testing.T) {
 		},
 		{
 			name:      "insufficient funds",
-			applyErr:  service.ErrSmallBalance,
-			wantErr:   service.ErrSmallBalance,
+			applyErr:  domain.ErrSmallBalance,
+			wantErr:   domain.ErrSmallBalance,
 			wantCalls: 1,
 		},
 		{
 			name:      "balance overflow",
-			applyErr:  service.ErrBalanceOverflow,
-			wantErr:   service.ErrBalanceOverflow,
+			applyErr:  domain.ErrBalanceOverflow,
+			wantErr:   domain.ErrBalanceOverflow,
 			wantCalls: 1,
 		},
 		{

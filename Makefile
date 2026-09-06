@@ -41,3 +41,6 @@ load-test-add-balance:
 
 load-test-get-balance:
 	vegeta attack -targets=./loadtests/vegeta_targets_get_balance.txt -rate=1000 -duration=30s | vegeta report
+
+load-test-minus-balance:
+	vegeta attack -targets=./loadtests/vegeta_targets_minus_balance.txt -rate=1000 -duration=30s | vegeta report

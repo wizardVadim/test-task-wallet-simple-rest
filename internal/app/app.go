@@ -40,8 +40,8 @@ func Run() error {
 		return err
 	}
 
-	poolConfig.MaxConns = 50
-	poolConfig.MinConns = 10
+	poolConfig.MaxConns = int32(config.MaxDbConnections)
+	poolConfig.MinConns = int32(config.MinDbConnections)
 
 	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {
@@ -68,10 +68,10 @@ func Run() error {
 	server := &http.Server{
 		Addr:              ":" + config.HTTPAddr,
 		Handler:           mux,
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       5 * time.Second,
-		WriteTimeout:      20 * time.Second,
-		IdleTimeout:       120 * time.Second,
+		ReadHeaderTimeout: time.Duration(config.ReadHeaderTimeout) * time.Second,
+		ReadTimeout:       time.Duration(config.ReadTimeout) * time.Second,
+		WriteTimeout:      time.Duration(config.WriteTimeout) * time.Second,
+		IdleTimeout:       time.Duration(config.IdleTimeout) * time.Second,
 	}
 
 	stopCtx, stop := signal.NotifyContext(

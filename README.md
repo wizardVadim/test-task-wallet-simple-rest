@@ -59,9 +59,36 @@ Compose passes the file's variables to the API, which reads them from its enviro
 | `POSTGRES_PORT` | Published database port for local connections | `5432` |
 | `HTTP_ADDR` | API listening port, without a colon | `8080` |
 | `HTTP_PORT` | Published API port on the host | `8080` |
+| `MAX_DB_CONNECTIONS` | Maximum connections in the API database pool | `1` |
+| `MIN_DB_CONNECTIONS` | Minimum connections maintained by the pool | `1` |
+| `READ_HEADER_TIMEOUT` | HTTP request header read timeout, in seconds | `5` |
+| `READ_TIMEOUT` | Entire HTTP request read timeout, in seconds | `5` |
+| `WRITE_TIMEOUT` | HTTP response write timeout, in seconds | `20` |
+| `IDLE_TIMEOUT` | HTTP keep-alive idle timeout, in seconds | `120` |
 
 The API container overrides `POSTGRES_PORT` to `5432`, the PostgreSQL port inside
 Compose. HTTP ports are mapped as `HTTP_PORT:HTTP_ADDR`.
+
+All settings listed above must be supplied. Pool limits and timeouts must be
+integers. `MAX_DB_CONNECTIONS` must be between 1 and 2147483647;
+`MIN_DB_CONNECTIONS` must be between 0 and `MAX_DB_CONNECTIONS`, inclusive.
+Timeouts must be positive and fit in a Go duration when converted from seconds
+(at most 9223372036 seconds). These are validation limits, not recommended tuning values.
+Invalid pool or timeout settings cause startup to fail with the variable name in the error.
+
+To compare pool sizes, change `MAX_DB_CONNECTIONS` in `config.env`, keeping
+`MIN_DB_CONNECTIONS` no greater than the maximum, and recreate the API container:
+
+```bash
+docker compose --env-file config.env up -d --no-deps --force-recreate wallet
+```
+
+An image rebuild is not needed for environment-only changes once the image includes
+support for these settings. A plain container restart does not reload `config.env`.
+Run identical load scenarios for each pool size and compare throughput, latency,
+errors, and final balances. Increasing the pool size does not guarantee higher throughput
+when all updates target the same wallet. `WRITE_TIMEOUT` controls response writes;
+it does not set a database query timeout.
 
 ## API
 

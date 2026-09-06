@@ -3,6 +3,7 @@ package repository_test
 import (
 	"context"
 	"errors"
+	"math"
 	"os"
 	"sync"
 	"testing"
@@ -18,7 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func setupRepository(t *testing.T) (context.Context, *repository.PostgresRepository, *repository.PostgresTxManager) {
+func setupRepository(t *testing.T) (context.Context, *repository.PostgresRepository) {
 	t.Helper()
 
 	dsn := os.Getenv("TEST_DATABASE_URL")
@@ -70,7 +71,7 @@ func setupRepository(t *testing.T) (context.Context, *repository.PostgresReposit
 		t.Fatalf("apply migration: %v", err)
 	}
 
-	return ctx, repository.NewPostgresRepository(pool), repository.NewPostgresTxManager(pool)
+	return ctx, repository.NewPostgresRepository(pool)
 }
 
 func newWalletID(t *testing.T) domain.WalletID {
@@ -91,13 +92,13 @@ func createWallet(t *testing.T, ctx context.Context, repo service.Repository) do
 	return id
 }
 
-func withBalance(t *testing.T, id domain.WalletID, balance int64) domain.Wallet {
+func withOperation(t *testing.T, id domain.WalletID, operationType domain.OperationType, amount int64) domain.WalletOperation {
 	t.Helper()
-	wallet, err := domain.NewWallet(id, balance)
+	operation, err := domain.NewWalletOperation(id, operationType, amount)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return wallet
+	return operation
 }
 
 func assertBalance(t *testing.T, ctx context.Context, repo service.Repository, id domain.WalletID, want int64) {
@@ -112,7 +113,7 @@ func assertBalance(t *testing.T, ctx context.Context, repo service.Repository, i
 }
 
 func TestCreateNewWallet(t *testing.T) {
-	ctx, repo, _ := setupRepository(t)
+	ctx, repo := setupRepository(t)
 	id := newWalletID(t)
 	wallet, err := repo.CreateNewWallet(ctx, id)
 	if err != nil {
@@ -125,53 +126,22 @@ func TestCreateNewWallet(t *testing.T) {
 }
 
 func TestGetWalletBalance(t *testing.T) {
-	ctx, repo, manager := setupRepository(t)
+	ctx, repo := setupRepository(t)
 	id := createWallet(t, ctx, repo)
-	if err := repo.UpdateBalance(ctx, withBalance(t, id, 125)); err != nil {
+	if err := repo.ApplyOperation(ctx, withOperation(t, id, domain.OperationTypeDeposit, 1000)); err != nil {
 		t.Fatal(err)
 	}
-	assertBalance(t, ctx, repo, id, 125)
-	err := manager.WithinTransaction(ctx, func(txRepo service.Repository) error {
-		balance, err := txRepo.GetWalletBalanceForUpdate(ctx, id)
-		if err != nil {
-			return err
-		}
-		if balance != 125 {
-			t.Errorf("locked balance = %d; want 125", balance)
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestUpdateBalance(t *testing.T) {
-	ctx, repo, _ := setupRepository(t)
-	id := createWallet(t, ctx, repo)
-	for _, balance := range []int64{100, 0} {
-		if err := repo.UpdateBalance(ctx, withBalance(t, id, balance)); err != nil {
-			t.Fatal(err)
-		}
-		assertBalance(t, ctx, repo, id, balance)
-	}
+	assertBalance(t, ctx, repo, id, 1000)
 }
 
 func TestWalletNotFound(t *testing.T) {
-	ctx, repo, manager := setupRepository(t)
+	ctx, repo := setupRepository(t)
 	id := newWalletID(t)
 	tests := []struct {
 		name string
 		run  func() error
 	}{
 		{"read", func() error { _, err := repo.GetWalletBalance(ctx, id); return err }},
-		{"read for update", func() error {
-			return manager.WithinTransaction(ctx, func(txRepo service.Repository) error {
-				_, err := txRepo.GetWalletBalanceForUpdate(ctx, id)
-				return err
-			})
-		}},
-		{"update", func() error { return repo.UpdateBalance(ctx, withBalance(t, id, 100)) }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -183,9 +153,9 @@ func TestWalletNotFound(t *testing.T) {
 }
 
 func TestCreateDuplicateWallet(t *testing.T) {
-	ctx, repo, _ := setupRepository(t)
+	ctx, repo := setupRepository(t)
 	id := createWallet(t, ctx, repo)
-	if err := repo.UpdateBalance(ctx, withBalance(t, id, 100)); err != nil {
+	if err := repo.ApplyOperation(ctx, withOperation(t, id, domain.OperationTypeDeposit, 100)); err != nil {
 		t.Fatal(err)
 	}
 	_, err := repo.CreateNewWallet(ctx, id)
@@ -196,67 +166,190 @@ func TestCreateDuplicateWallet(t *testing.T) {
 	assertBalance(t, ctx, repo, id, 100)
 }
 
-func TestTransactionCommit(t *testing.T) {
-	ctx, repo, manager := setupRepository(t)
+func TestConcurrentApplyOperations(t *testing.T) {
+	ctx, repo := setupRepository(t)
+
 	id := createWallet(t, ctx, repo)
-	wallet := withBalance(t, id, 100)
-	if err := manager.WithinTransaction(ctx, func(txRepo service.Repository) error {
-		return txRepo.UpdateBalance(ctx, wallet)
-	}); err != nil {
-		t.Fatal(err)
+
+	const operations = 40
+
+	start := make(chan struct{})
+	results := make(chan error, operations)
+
+	var workers sync.WaitGroup
+
+	for i := 0; i < operations; i++ {
+		workers.Add(1)
+
+		go func() {
+			defer workers.Done()
+
+			<-start
+
+			operation, err := domain.NewWalletOperation(
+				id,
+				domain.OperationTypeDeposit,
+				1,
+			)
+			if err != nil {
+				results <- err
+				return
+			}
+
+			results <- repo.ApplyOperation(ctx, operation)
+		}()
 	}
-	assertBalance(t, ctx, repo, id, 100)
+
+	close(start)
+
+	workers.Wait()
+	close(results)
+
+	for err := range results {
+		if err != nil {
+			t.Errorf("concurrent operation: %v", err)
+		}
+	}
+
+	assertBalance(t, ctx, repo, id, operations)
 }
 
-func TestTransactionRollback(t *testing.T) {
-	ctx, repo, manager := setupRepository(t)
+func TestApplyOperationCancelledContext(t *testing.T) {
+	ctx, repo := setupRepository(t)
+
 	id := createWallet(t, ctx, repo)
-	wallet := withBalance(t, id, 100)
-	expectedErr := errors.New("callback failed")
-	err := manager.WithinTransaction(ctx, func(txRepo service.Repository) error {
-		if err := txRepo.UpdateBalance(ctx, wallet); err != nil {
-			return err
-		}
-		return expectedErr
-	})
-	if !errors.Is(err, expectedErr) {
-		t.Fatalf("error = %v; want callback error", err)
+
+	operation, err := domain.NewWalletOperation(
+		id,
+		domain.OperationTypeDeposit,
+		100,
+	)
+	if err != nil {
+		t.Fatal(err)
 	}
+
+	cancelledCtx, cancel := context.WithCancel(ctx)
+	cancel()
+
+	err = repo.ApplyOperation(cancelledCtx, operation)
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v; want context.Canceled", err)
+	}
+
 	assertBalance(t, ctx, repo, id, 0)
 }
 
-func TestConcurrentWalletUpdates(t *testing.T) {
-	ctx, repo, manager := setupRepository(t)
-	id := createWallet(t, ctx, repo)
-	const operations = 40
-	start := make(chan struct{})
-	results := make(chan error, operations)
-	var workers sync.WaitGroup
-	for i := 0; i < operations; i++ {
-		workers.Add(1)
-		go func() {
-			defer workers.Done()
-			<-start
-			results <- manager.WithinTransaction(ctx, func(txRepo service.Repository) error {
-				balance, err := txRepo.GetWalletBalanceForUpdate(ctx, id)
-				if err != nil {
-					return err
-				}
-				wallet, err := domain.NewWallet(id, balance+1)
-				if err != nil {
-					return err
-				}
-				return txRepo.UpdateBalance(ctx, wallet)
-			})
-		}()
+func TestApplyOperation(t *testing.T) {
+	ctx, repo := setupRepository(t)
+
+	tests := []struct {
+		name          string
+		initial       int64
+		operationType domain.OperationType
+		amount        int64
+		wantBalance   int64
+		wantErr       error
+		missingWallet bool
+	}{
+		{
+			name:          "deposit",
+			initial:       100,
+			operationType: domain.OperationTypeDeposit,
+			amount:        50,
+			wantBalance:   150,
+		},
+		{
+			name:          "withdraw",
+			initial:       100,
+			operationType: domain.OperationTypeWithdraw,
+			amount:        40,
+			wantBalance:   60,
+		},
+		{
+			name:          "withdraw to zero",
+			initial:       100,
+			operationType: domain.OperationTypeWithdraw,
+			amount:        100,
+			wantBalance:   0,
+		},
+		{
+			name:          "deposit to max int64",
+			initial:       math.MaxInt64 - 1,
+			operationType: domain.OperationTypeDeposit,
+			amount:        1,
+			wantBalance:   math.MaxInt64,
+		},
+		{
+			name:          "balance overflow",
+			initial:       math.MaxInt64,
+			operationType: domain.OperationTypeDeposit,
+			amount:        1,
+			wantBalance:   math.MaxInt64,
+			wantErr:       domain.ErrBalanceOverflow,
+		},
+		{
+			name:          "insufficient funds",
+			initial:       100,
+			operationType: domain.OperationTypeWithdraw,
+			amount:        101,
+			wantBalance:   100,
+			wantErr:       domain.ErrSmallBalance,
+		},
+		{
+			name:          "wallet not found",
+			operationType: domain.OperationTypeDeposit,
+			amount:        100,
+			wantErr:       domain.ErrWalletNotFound,
+			missingWallet: true,
+		},
 	}
-	close(start)
-	workers.Wait()
-	close(results)
-	for err := range results {
-		if err != nil {
-			t.Errorf("concurrent update: %v", err)
-		}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var id domain.WalletID
+
+			if tt.missingWallet {
+				id = newWalletID(t)
+			} else {
+				id = createWallet(t, ctx, repo)
+
+				if tt.initial != 0 {
+					if err := repo.ApplyOperation(
+						ctx,
+						withOperation(t, id, domain.OperationTypeDeposit, tt.initial),
+					); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+
+			operation := withOperation(
+				t,
+				id,
+				tt.operationType,
+				tt.amount,
+			)
+
+			err := repo.ApplyOperation(ctx, operation)
+
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf(
+					"error = %v; want %v",
+					err,
+					tt.wantErr,
+				)
+			}
+
+			if !tt.missingWallet {
+				assertBalance(
+					t,
+					ctx,
+					repo,
+					id,
+					tt.wantBalance,
+				)
+			}
+		})
 	}
-	assertBalance(t, ctx, repo, id, operations)
 }

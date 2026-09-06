@@ -2,6 +2,7 @@
 .PHONY: local-test-go
 .PHONY: docker-start
 .PHONY: docker-stop integration-test
+.PHONY: docker-rebuild
 
 local-run-go:
 	@set -a && \
@@ -18,8 +19,6 @@ docker-start:
 
 docker-stop:
 	@docker compose --env-file config.env down
-
-.PHONY: docker-rebuild
 
 docker-rebuild:
 	@docker compose --env-file config.env up -d --build wallet
@@ -38,4 +37,10 @@ integration-test:
 		go test -count=1 -v ./internal/features/wallet/repository
 
 load-test-add-balance:
-	vegeta attack -targets=./loadtests/vegeta_targets.txt -rate=1000 -duration=30s | vegeta report
+	vegeta attack -targets=./loadtests/vegeta_targets_add_balance.txt -rate=1000 -duration=30s | vegeta report
+
+load-test-get-balance:
+	vegeta attack -targets=./loadtests/vegeta_targets_get_balance.txt -rate=1000 -duration=30s | vegeta report
+
+load-test-minus-balance:
+	vegeta attack -targets=./loadtests/vegeta_targets_minus_balance.txt -rate=1000 -duration=30s | vegeta report

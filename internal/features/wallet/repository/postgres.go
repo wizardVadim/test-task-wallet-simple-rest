@@ -72,50 +72,49 @@ func (r *PostgresRepository) GetWalletBalance(ctx context.Context, walletID doma
 	return balance, nil
 }
 
-func (r *PostgresRepository) GetWalletBalanceForUpdate(ctx context.Context, walletID domain.WalletID) (int64, error) {
-	if err := ctx.Err(); err != nil {
-		return 0, err
-	}
-
-	queryRow := `
-		SELECT balance 
-		FROM wallets
-		WHERE id=$1
-		FOR UPDATE;
-	`
-
-	var balance int64
-
-	err := r.db.QueryRow(ctx, queryRow, walletID.Value()).Scan(&balance)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return 0, domain.ErrWalletNotFound
-		}
-
-		return 0, fmt.Errorf("get wallet balance for update: %w", err)
-	}
-
-	return balance, nil
-}
-
-func (r *PostgresRepository) UpdateBalance(ctx context.Context, wallet domain.Wallet) error {
+func (r *PostgresRepository) ApplyOperation(ctx context.Context, operation domain.WalletOperation) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	queryRow := `
-		UPDATE wallets
-		SET balance=$1
-		WHERE id=$2
-	`
+	var query string
+	var errBalanceCheck error
 
-	tag, err := r.db.Exec(ctx, queryRow, wallet.Balance(), wallet.ID().Value())
+	switch operation.OperationType() {
+	case domain.OperationTypeDeposit:
+		query = `
+            UPDATE wallets 
+            SET balance = balance + $1 
+            WHERE id = $2 AND (9223372036854775807 - balance >= $1)
+        `
+		errBalanceCheck = domain.ErrBalanceOverflow
+
+	case domain.OperationTypeWithdraw:
+		query = `
+            UPDATE wallets 
+            SET balance = balance - $1 
+            WHERE id = $2 AND balance >= $1
+        `
+		errBalanceCheck = domain.ErrSmallBalance
+	default:
+		return domain.ErrInvalidOperationType
+	}
+
+	tag, err := r.db.Exec(ctx, query, operation.Amount(), operation.WalletID().Value())
 	if err != nil {
-		return fmt.Errorf("update wallet balance: %w", err)
+		return fmt.Errorf("apply wallet operation: %w", err)
 	}
 
 	if tag.RowsAffected() == 0 {
-		return domain.ErrWalletNotFound
+		var exists bool
+		checkErr := r.db.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM wallets WHERE id=$1)", operation.WalletID().Value()).Scan(&exists)
+		if checkErr != nil {
+			return fmt.Errorf("check wallet existence: %w", checkErr)
+		}
+		if !exists {
+			return domain.ErrWalletNotFound
+		}
+		return errBalanceCheck
 	}
 
 	return nil

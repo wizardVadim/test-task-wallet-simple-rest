@@ -9,3 +9,8 @@ var (
 	ErrBalanceMustBePositiveOrZero = errors.New("balance below zero")
 	ErrWalletNotFound              = errors.New("wallet not found")
 )
+
+var (
+	ErrSmallBalance    = errors.New("insufficient funds on the balance")
+	ErrBalanceOverflow = errors.New("balance overflow")
+)

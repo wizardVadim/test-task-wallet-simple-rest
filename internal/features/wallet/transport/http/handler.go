@@ -8,7 +8,6 @@ import (
 	"net/http"
 
 	"wallet-app/internal/core/domain"
-	"wallet-app/internal/features/wallet/service"
 
 	"github.com/google/uuid"
 )
@@ -198,14 +197,14 @@ func (h *Handler) ChangeWalletBalance(w http.ResponseWriter, r *http.Request) {
 		var response ResponseDTO
 		var statusCode int
 
-		if errors.Is(err, service.ErrSmallBalance) {
+		if errors.Is(err, domain.ErrSmallBalance) {
 			response = ResponseDTO{
 				Error: &ErrorDTO{
 					Message: ErrorInsufficientFunds,
 				},
 			}
 			statusCode = http.StatusConflict
-		} else if errors.Is(err, service.ErrBalanceOverflow) {
+		} else if errors.Is(err, domain.ErrBalanceOverflow) {
 			response = ResponseDTO{
 				Error: &ErrorDTO{
 					Message: ErrorBalanceOverflow,

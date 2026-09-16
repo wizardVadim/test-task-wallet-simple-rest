@@ -22,7 +22,7 @@ services:
       db:
         condition: service_healthy
     volumes:
-      - ./migrations:/migrations:ro
+      - ./services/gw-currency-wallet/migrations:/migrations:ro
     command:
       - "-path"
       - "/migrations"
@@ -31,7 +31,9 @@ services:
       - "up"
 
   wallet:
-    build: .
+    build:
+      context: .
+      dockerfile: ./services/gw-currency-wallet/Dockerfile
     image: wallet-app:local
     env_file:
       - config.env

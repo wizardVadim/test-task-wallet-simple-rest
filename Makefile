@@ -1,3 +1,5 @@
+WALLET_DIR := services/gw-currency-wallet
+
 .PHONY: local-run-go
 .PHONY: local-test-go
 .PHONY: docker-start
@@ -8,11 +10,10 @@ local-run-go:
 	@set -a && \
 	. ./config.env && \
 	set +a && \
-	POSTGRES_HOST=localhost go run ./cmd
-
+	POSTGRES_HOST=localhost go run ./$(WALLET_DIR)/cmd
 
 local-test-go:
-	@go test ./cmd/... ./internal/...
+	@go test ./$(WALLET_DIR)/...
 
 docker-start:
 	@docker compose --env-file config.env up -d
@@ -34,13 +35,13 @@ integration-test:
 	$(TEST_COMPOSE) up --wait --wait-timeout 60; \
 	test_address=$$($(TEST_COMPOSE) port db 5432); \
 	TEST_DATABASE_URL="postgres://test_user:test_password@$$test_address/wallet_test?sslmode=disable" \
-		go test -count=1 -v ./internal/features/wallet/repository
+		go test -count=1 -v ./$(WALLET_DIR)/internal/features/wallet/repository
 
 load-test-add-balance:
-	vegeta attack -targets=./loadtests/vegeta_targets_add_balance.txt -rate=1000 -duration=30s | vegeta report
+	cd $(WALLET_DIR) && vegeta attack -targets=./loadtests/vegeta_targets_add_balance.txt -rate=1000 -duration=30s | vegeta report
 
 load-test-get-balance:
-	vegeta attack -targets=./loadtests/vegeta_targets_get_balance.txt -rate=1000 -duration=30s | vegeta report
+	cd $(WALLET_DIR) && vegeta attack -targets=./loadtests/vegeta_targets_get_balance.txt -rate=1000 -duration=30s | vegeta report
 
 load-test-minus-balance:
-	vegeta attack -targets=./loadtests/vegeta_targets_minus_balance.txt -rate=1000 -duration=30s | vegeta report
+	cd $(WALLET_DIR) && vegeta attack -targets=./loadtests/vegeta_targets_minus_balance.txt -rate=1000 -duration=30s | vegeta report

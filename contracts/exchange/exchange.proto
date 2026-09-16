@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package exchange;
+
+option go_package = "contracts/exchange;exchange";
+
+service ExchangeService {
+    rpc GetExchangeRates(Empty) returns (ExchangeRatesResponse);
+
+    rpc GetExchangeRateForCurrency(CurrencyRequest)
+        returns (ExchangeRateResponse);
+}
+
+message Empty {}
+
+message CurrencyRequest {
+    string from_currency = 1;
+    string to_currency = 2;
+}
+
+message ExchangeRateResponse {
+    string from_currency = 1;
+    string to_currency = 2;
+
+    float rate = 3;
+}
+
+// Source currency is USD, others will be counted from it
+// base_currency = "USD"
+message ExchangeRatesResponse {
+    map<string, float> rates = 1;
+    string base_currency = 2;
+}

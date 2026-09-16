@@ -3,3 +3,6 @@ config.env
 
 # Internal data
 /out/
+
+# The task data
+/task_data/

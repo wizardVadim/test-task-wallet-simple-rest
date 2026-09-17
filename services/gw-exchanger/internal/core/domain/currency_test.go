@@ -30,7 +30,7 @@ func TestNewCurrency(t *testing.T) {
 		{
 			name:         "test low register",
 			currencyType: "usd",
-			wantErr:      domain.ErrInvalidCurrencyType,
+			wantErr:      nil,
 		},
 		{
 			name:         "test empty currency type",

@@ -1,5 +1,7 @@
 package domain
 
+import "strings"
+
 type CurrencyType string
 
 const (
@@ -8,13 +10,15 @@ const (
 	CurrencyEUR CurrencyType = "EUR"
 )
 
+const BaseCurrency = CurrencyUSD
+
 type Currency struct {
 	currencyType CurrencyType
 }
 
 func NewCurrency(currencyType CurrencyType) (Currency, error) {
 	currency := Currency{
-		currencyType: currencyType,
+		currencyType: CurrencyType(strings.ToUpper(string(currencyType))),
 	}
 
 	if err := currency.validate(); err != nil {

@@ -1,5 +1,5 @@
 services:
-  db:
+  db-currency-wallet:
     image: postgres
     environment:
       - POSTGRES_USER=${POSTGRES_USER}
@@ -7,7 +7,7 @@ services:
       - POSTGRES_DB=${POSTGRES_NAME}
       - PGDATA=/data/postgres
     volumes:
-      - ./out/pg_data:/data/postgres
+      - ./out/wallet_pg_data:/data/postgres
     ports:
       - "${POSTGRES_PORT}:5432"
     healthcheck:
@@ -16,10 +16,27 @@ services:
       timeout: 10s
       retries: 5
 
-  migrate:
+  db-exchanger:
+    image: postgres
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER_EXCHANGER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD_EXCHANGER}
+      - POSTGRES_DB=${POSTGRES_NAME_EXCHANGER}
+      - PGDATA=/data/postgres
+    volumes:
+      - ./out/exchanger_pg_data:/data/postgres
+    ports:
+      - "${POSTGRES_PORT_EXCHANGER}:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\"" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  migrate-wallet:
     image: migrate/migrate:v4.19.1
     depends_on:
-      db:
+      db-currency-wallet:
         condition: service_healthy
     volumes:
       - ./services/gw-currency-wallet/migrations:/migrations:ro
@@ -27,7 +44,21 @@ services:
       - "-path"
       - "/migrations"
       - "-database"
-      - "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_NAME}?sslmode=disable"
+      - "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db-currency-wallet:5432/${POSTGRES_NAME}?sslmode=disable"
+      - "up"
+
+  migrate-exchanger:
+    image: migrate/migrate:v4.19.1
+    depends_on:
+      db-exchanger:
+        condition: service_healthy
+    volumes:
+      - ./services/gw-exchanger/migrations:/migrations:ro
+    command:
+      - "-path"
+      - "/migrations"
+      - "-database"
+      - "postgres://${POSTGRES_USER_EXCHANGER}:${POSTGRES_PASSWORD_EXCHANGER}@db-exchanger:5432/${POSTGRES_NAME_EXCHANGER}?sslmode=disable"
       - "up"
 
   wallet:
@@ -42,5 +73,5 @@ services:
     ports:
       - "${HTTP_PORT}:${HTTP_ADDR}"
     depends_on:
-      migrate:
+      migrate-wallet:
         condition: service_completed_successfully

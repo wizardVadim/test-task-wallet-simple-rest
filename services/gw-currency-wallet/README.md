@@ -16,15 +16,16 @@ cp example_config.env config.env
 docker compose --env-file config.env up --build -d
 ```
 
-Compose starts PostgreSQL, applies migrations using the migrate container,
+Compose starts `db-currency-wallet`, applies migrations using `migrate-wallet`,
 and starts the API after migrations succeed. No local Go or migrate installation
-is required for this workflow. The default API URL is `http://localhost:8080`.
+is required for this workflow. The full Compose stack also starts the exchanger database
+and its migrations. The default API URL is `http://localhost:8080`.
 
 Inspect startup status and logs:
 
 ```bash
 docker compose --env-file config.env ps -a
-docker compose --env-file config.env logs migrate wallet
+docker compose --env-file config.env logs migrate-wallet wallet
 ```
 
 Stop the application:
@@ -33,7 +34,7 @@ Stop the application:
 docker compose --env-file config.env down
 ```
 
-PostgreSQL data persists in `out/pg_data`. Local configuration and database data
+PostgreSQL data persists in `out/wallet_pg_data`. Local configuration and database data
 are excluded from Git. Database initialization settings apply to a new data directory;
 changing credentials in the env file does not update an existing database user.
 
@@ -57,12 +58,12 @@ Compose passes the file's variables to the API, which reads them from its enviro
 |---|---|---|
 | `POSTGRES_USER` | Database user | `test_user` |
 | `POSTGRES_PASSWORD` | Database password | `test_pass` |
-| `POSTGRES_HOST` | Database host inside Compose | `db` |
+| `POSTGRES_HOST` | Database host inside Compose | `db-currency-wallet` |
 | `POSTGRES_NAME` | Database name | `bank` |
 | `POSTGRES_PORT` | Published database port for local connections | `5432` |
 | `HTTP_ADDR` | API listening port, without a colon | `8080` |
 | `HTTP_PORT` | Published API port on the host | `8080` |
-| `MAX_DB_CONNECTIONS` | Maximum connections in the API database pool | `1` |
+| `MAX_DB_CONNECTIONS` | Maximum connections in the API database pool | `4` |
 | `MIN_DB_CONNECTIONS` | Minimum connections maintained by the pool | `1` |
 | `READ_HEADER_TIMEOUT` | HTTP request header read timeout, in seconds | `5` |
 | `READ_TIMEOUT` | Entire HTTP request read timeout, in seconds | `5` |
@@ -207,8 +208,8 @@ Requires a Go toolchain compatible with the root `go.work` and this service’s 
 apply migrations, then run the API locally:
 
 ```bash
-docker compose --env-file config.env up -d db migrate
-docker compose --env-file config.env wait migrate
+docker compose --env-file config.env up -d db-currency-wallet migrate-wallet
+docker compose --env-file config.env wait migrate-wallet
 make local-run-go
 ```
 

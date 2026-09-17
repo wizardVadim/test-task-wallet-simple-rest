@@ -15,7 +15,8 @@ import (
 func setValidEnv(t *testing.T) {
 	t.Helper()
 	for key, value := range map[string]string{
-		"HTTP_ADDR":           "8080",
+		"LOG_LEVEL_WALLET":    "INFO",
+		"HTTP_PORT":           "8080",
 		"MAX_DB_CONNECTIONS":  "1",
 		"MIN_DB_CONNECTIONS":  "1",
 		"READ_HEADER_TIMEOUT": "5",
@@ -40,7 +41,7 @@ func TestLoad(t *testing.T) {
 		t.Fatalf("Load() error = %v", err)
 	}
 	want := config.Config{
-		HTTPAddr:          "8080",
+		HTTPPort:          "8080",
 		MaxDbConnections:  1,
 		MinDbConnections:  1,
 		ReadHeaderTimeout: 5,
@@ -62,7 +63,7 @@ func TestLoad(t *testing.T) {
 
 func TestLoadRequiredEnv(t *testing.T) {
 	keys := []string{
-		"HTTP_ADDR",
+		"HTTP_PORT",
 		"MAX_DB_CONNECTIONS",
 		"MIN_DB_CONNECTIONS",
 		"READ_HEADER_TIMEOUT",

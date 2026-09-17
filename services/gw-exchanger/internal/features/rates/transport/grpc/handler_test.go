@@ -400,3 +400,19 @@ func mustExchangeRate(
 
 	return exchangeRate
 }
+
+func TestStoredInvalidCurrencyIsInternal(t *testing.T) {
+	handler := New(&stubRateService{
+		getAllFn: func(context.Context) ([]domain.ExchangeRate, error) { return nil, domain.ErrInvalidCurrencyType },
+		getRateFn: func(context.Context, domain.Currency, domain.Currency) (domain.ExchangeRate, error) {
+			return domain.ExchangeRate{}, domain.ErrInvalidCurrencyType
+		},
+	})
+	_, allErr := handler.GetExchangeRates(context.Background(), &exchange.Empty{})
+	_, pairErr := handler.GetExchangeRateForCurrency(context.Background(), &exchange.CurrencyRequest{FromCurrency: "USD", ToCurrency: "EUR"})
+	for _, err := range []error{allErr, pairErr} {
+		if status.Code(err) != codes.Internal || status.Convert(err).Message() != "internal server error" {
+			t.Errorf("got %v, want sanitized Internal", err)
+		}
+	}
+}

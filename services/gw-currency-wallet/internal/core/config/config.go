@@ -2,6 +2,8 @@ package config
 
 import (
 	"fmt"
+	"github.com/joho/godotenv"
+	"log/slog"
 	"math"
 	"os"
 	"strconv"
@@ -9,7 +11,8 @@ import (
 )
 
 type Config struct {
-	HTTPAddr          string
+	LogLevel          slog.Level
+	HTTPPort          string
 	DB                DBConfig
 	MaxDbConnections  int
 	MinDbConnections  int
@@ -27,9 +30,25 @@ type DBConfig struct {
 	Name     string
 }
 
-func Load() (Config, error) {
+// LoadFile reads dotenv settings; explicitly set environment variables take precedence.
+func LoadFile(path string) (Config, error) {
+	values, err := godotenv.Read(path)
+	if err != nil {
+		return Config{}, fmt.Errorf("cannot read or parse configuration file %q", path)
+	}
+	return load(func(key string) string {
+		if value, ok := os.LookupEnv(key); ok {
+			return value
+		}
+		return values[key]
+	})
+}
+
+func Load() (Config, error) { return load(os.Getenv) }
+
+func load(getenv func(string) string) (Config, error) {
 	required := []string{
-		"HTTP_ADDR",
+		"HTTP_PORT",
 		"POSTGRES_HOST",
 		"POSTGRES_PORT",
 		"POSTGRES_USER",
@@ -44,38 +63,38 @@ func Load() (Config, error) {
 	}
 
 	for _, key := range required {
-		if os.Getenv(key) == "" {
+		if getenv(key) == "" {
 			return Config{}, fmt.Errorf("environment variable %s is required", key)
 		}
 	}
 
-	maxDbConnections, err := strconv.Atoi(os.Getenv("MAX_DB_CONNECTIONS"))
+	maxDbConnections, err := strconv.Atoi(getenv("MAX_DB_CONNECTIONS"))
 	if err != nil {
 		return Config{}, fmt.Errorf("MAX_DB_CONNECTIONS: cannot convert variable: %w", err)
 	}
-	minDbConnections, err := strconv.Atoi(os.Getenv("MIN_DB_CONNECTIONS"))
+	minDbConnections, err := strconv.Atoi(getenv("MIN_DB_CONNECTIONS"))
 	if err != nil {
 		return Config{}, fmt.Errorf("MIN_DB_CONNECTIONS: cannot convert variable: %w", err)
 	}
-	readHeaderTimeout, err := strconv.Atoi(os.Getenv("READ_HEADER_TIMEOUT"))
+	readHeaderTimeout, err := strconv.Atoi(getenv("READ_HEADER_TIMEOUT"))
 	if err != nil {
 		return Config{}, fmt.Errorf("READ_HEADER_TIMEOUT: cannot convert variable: %w", err)
 	}
-	readTimeout, err := strconv.Atoi(os.Getenv("READ_TIMEOUT"))
+	readTimeout, err := strconv.Atoi(getenv("READ_TIMEOUT"))
 	if err != nil {
 		return Config{}, fmt.Errorf("READ_TIMEOUT: cannot convert variable: %w", err)
 	}
-	writeTimeout, err := strconv.Atoi(os.Getenv("WRITE_TIMEOUT"))
+	writeTimeout, err := strconv.Atoi(getenv("WRITE_TIMEOUT"))
 	if err != nil {
 		return Config{}, fmt.Errorf("WRITE_TIMEOUT: cannot convert variable: %w", err)
 	}
-	idleTimeout, err := strconv.Atoi(os.Getenv("IDLE_TIMEOUT"))
+	idleTimeout, err := strconv.Atoi(getenv("IDLE_TIMEOUT"))
 	if err != nil {
 		return Config{}, fmt.Errorf("IDLE_TIMEOUT: cannot convert variable: %w", err)
 	}
 
 	config := Config{
-		HTTPAddr:          os.Getenv("HTTP_ADDR"),
+		HTTPPort:          getenv("HTTP_PORT"),
 		MaxDbConnections:  maxDbConnections,
 		MinDbConnections:  minDbConnections,
 		ReadHeaderTimeout: readHeaderTimeout,
@@ -83,12 +102,18 @@ func Load() (Config, error) {
 		WriteTimeout:      writeTimeout,
 		IdleTimeout:       idleTimeout,
 		DB: DBConfig{
-			Host:     os.Getenv("POSTGRES_HOST"),
-			Port:     os.Getenv("POSTGRES_PORT"),
-			User:     os.Getenv("POSTGRES_USER"),
-			Password: os.Getenv("POSTGRES_PASSWORD"),
-			Name:     os.Getenv("POSTGRES_NAME"),
+			Host:     getenv("POSTGRES_HOST"),
+			Port:     getenv("POSTGRES_PORT"),
+			User:     getenv("POSTGRES_USER"),
+			Password: getenv("POSTGRES_PASSWORD"),
+			Name:     getenv("POSTGRES_NAME"),
 		},
+	}
+
+	if level := getenv("LOG_LEVEL_WALLET"); level != "" {
+		if err := config.LogLevel.UnmarshalText([]byte(level)); err != nil {
+			return Config{}, fmt.Errorf("LOG_LEVEL_WALLET must be DEBUG, INFO, WARN or ERROR")
+		}
 	}
 
 	if err := config.validate(); err != nil {

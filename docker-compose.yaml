@@ -70,8 +70,32 @@ services:
       - config.env
     environment:
       POSTGRES_PORT: "5432"
+      HTTP_PORT: "${HTTP_PORT}"
     ports:
-      - "${HTTP_PORT}:${HTTP_ADDR}"
+      - "${HTTP_OUT_PORT}:${HTTP_PORT}"
     depends_on:
       migrate-wallet:
+        condition: service_completed_successfully
+
+  exchanger:
+    build:
+      context: .
+      dockerfile: ./services/gw-exchanger/Dockerfile
+
+    image: exchanger-app:local
+
+    env_file:
+      - config.env
+
+    environment:
+      POSTGRES_HOST_EXCHANGER: "db-exchanger"
+      POSTGRES_PORT_EXCHANGER: "5432"
+      GRPC_ADDR: "0.0.0.0"
+      GRPC_PORT: "${GRPC_PORT}"
+
+    ports:
+      - "${GRPC_OUT_PORT}:${GRPC_PORT}"
+
+    depends_on:
+      migrate-exchanger:
         condition: service_completed_successfully

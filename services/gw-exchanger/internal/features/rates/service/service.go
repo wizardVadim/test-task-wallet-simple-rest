@@ -33,6 +33,20 @@ func (service *Service) GetRate(ctx context.Context, from domain.Currency, to do
 	if !to.IsValid() {
 		return domain.ExchangeRate{}, fmt.Errorf("currency to error: %w", domain.ErrInvalidCurrencyType)
 	}
+
+	if from.IsEqual(to) {
+		rate, err := domain.NewRate(1.0)
+		if err != nil {
+			return domain.ExchangeRate{}, err
+		}
+
+		return domain.NewExchangeRate(
+			rate,
+			from,
+			to,
+		)
+	}
+
 	baseRates, err := service.repository.GetAll(ctx)
 	if err != nil {
 		return domain.ExchangeRate{}, fmt.Errorf("repository error: %w", err)

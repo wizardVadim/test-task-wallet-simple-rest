@@ -4,6 +4,8 @@ import (
 	"context"
 	"contracts/exchange"
 	"exchanger-app/internal/core/domain"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type Handler struct {
@@ -46,12 +48,12 @@ func (h *Handler) GetExchangeRateForCurrency(ctx context.Context, req *exchange.
 
 	from, err := domain.NewCurrency(domain.CurrencyType(req.GetFromCurrency()))
 	if err != nil {
-		return nil, mapError(err)
+		return nil, status.Error(codes.InvalidArgument, "invalid from currency")
 	}
 
 	to, err := domain.NewCurrency(domain.CurrencyType(req.GetToCurrency()))
 	if err != nil {
-		return nil, mapError(err)
+		return nil, status.Error(codes.InvalidArgument, "invalid to currency")
 	}
 
 	rate, err := h.service.GetRate(ctx, from, to)

@@ -40,3 +40,10 @@ func (currency Currency) CurrencyType() CurrencyType {
 func (currency Currency) IsEqual(other Currency) bool {
 	return currency.currencyType == other.currencyType
 }
+
+func (currency Currency) IsValid() bool {
+	if err := currency.validate(); err != nil {
+		return false
+	}
+	return true
+}

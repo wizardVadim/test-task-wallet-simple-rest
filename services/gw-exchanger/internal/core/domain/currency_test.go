@@ -63,6 +63,28 @@ func mustCurrency(t *testing.T, currencyType domain.CurrencyType) domain.Currenc
 	return currency
 }
 
+func TestCurrencyIsEqual(t *testing.T) {
+	tests := []struct {
+		name  string
+		left  domain.CurrencyType
+		right domain.CurrencyType
+		want  bool
+	}{
+		{name: "same currency", left: domain.CurrencyUSD, right: domain.CurrencyUSD, want: true},
+		{name: "different currencies", left: domain.CurrencyUSD, right: domain.CurrencyEUR, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			left := mustCurrency(t, tt.left)
+			right := mustCurrency(t, tt.right)
+			if got := left.IsEqual(right); got != tt.want {
+				t.Errorf("IsEqual(%s, %s) = %t, want %t", tt.left, tt.right, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestCurrencyType(t *testing.T) {
 	tests := []struct {
 		name         string

@@ -36,3 +36,7 @@ func (currency Currency) validate() error {
 func (currency Currency) CurrencyType() CurrencyType {
 	return currency.currencyType
 }
+
+func (currency Currency) IsEqual(other Currency) bool {
+	return currency.currencyType == other.currencyType
+}

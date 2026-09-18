@@ -295,3 +295,24 @@ func mustExchangeRate(
 
 	return exchangeRate
 }
+
+func TestServiceSameCurrencyDoesNotReadRepository(t *testing.T) {
+	repository := &stubRateRepository{getAllFn: func(context.Context) ([]domain.ExchangeRate, error) {
+		t.Fatal("same-currency conversion must not access the repository")
+		return nil, nil
+	}}
+	s := New(repository)
+	for _, code := range []domain.CurrencyType{domain.CurrencyUSD, domain.CurrencyEUR, domain.CurrencyRUB} {
+		currency := mustCurrency(t, code)
+		got, err := s.GetRate(context.Background(), currency, currency)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Rate().Value() != 1 || !got.FromCurrency().IsEqual(currency) || !got.ToCurrency().IsEqual(currency) {
+			t.Errorf("incorrect identity rate for %s", code)
+		}
+	}
+	if _, err := s.GetRate(context.Background(), domain.Currency{}, domain.Currency{}); !errors.Is(err, domain.ErrInvalidCurrencyType) {
+		t.Fatalf("empty currencies must fail validation, got %v", err)
+	}
+}

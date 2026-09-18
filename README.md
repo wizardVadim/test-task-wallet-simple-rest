@@ -69,7 +69,7 @@ to an empty data directory; editing credentials does not change an existing user
 | `make local-test-go` | Test both services and compile shared contracts |
 | `make test-wallet` | Run wallet tests |
 | `make test-exchanger` | Run exchanger tests |
-| `make integration-test` | Run wallet repository tests against temporary PostgreSQL |
+| `make integration-test` | Run both repository suites against temporary PostgreSQL |
 
 `docker-start` does not rebuild existing images after source changes; use
 `docker-rebuild`. For one application only, use `docker compose --env-file
@@ -110,14 +110,15 @@ make local-test-go
 make integration-test
 ```
 
-Without `TEST_DATABASE_URL`, wallet repository integration tests are skipped.
+Without `TEST_DATABASE_URL`, repository integration tests for both services are skipped.
 `make integration-test` creates a temporary PostgreSQL instance, runs those tests,
 and removes its containers, network and volumes afterward. It does not use the
 development databases or `config.env`.
 
-Exchanger currently has domain, service, configuration, repository unit tests and
-gRPC tests using an in-memory connection. Its repository tests do not yet exercise
-real PostgreSQL. The integration target currently covers wallet only.
+Exchanger has domain, service, configuration, repository unit tests and gRPC tests
+using an in-memory connection. Its PostgreSQL integration tests cover seeded rates,
+empty results, concurrent reads, invalid stored currencies, database constraints
+and migration rollback/reapplication. Each test uses its own schema.
 
 Wallet load-test targets remain `load-test-add-balance`, `load-test-minus-balance`
 and `load-test-get-balance`; they require Vegeta and run for 30 seconds.

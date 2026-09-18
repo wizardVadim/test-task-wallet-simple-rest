@@ -91,5 +91,15 @@ make test-exchanger
 
 Tests cover domain validation, cross rates, repository error handling, configuration,
 CLI flags, gRPC responses and logging. The transport test uses a gRPC client/server
-connected in memory. Repository tests currently use test doubles; a PostgreSQL
-integration suite for exchanger is still pending.
+connected in memory. Repository unit tests use test doubles.
+
+```bash
+make integration-test
+```
+
+This runs both wallet and exchanger repository suites against temporary PostgreSQL.
+Exchanger tests apply the real migrations in isolated schemas and verify seeded and
+empty results, concurrent reads, cancellation, query failures, invalid stored data,
+constraints, and migration rollback/reapplication. Without `TEST_DATABASE_URL`,
+these integration tests are skipped by normal `go test` runs. The Make target
+cleans up the temporary container and volumes and does not use development data.

@@ -256,7 +256,7 @@ make integration-test
 ```
 
 Requires Go, Make, Docker Compose with `up --wait` support, and a running local
-Docker daemon. The command uses `docker-compose.test.yaml`, selects an available
+Docker daemon. The target covers wallet and exchanger repositories. The command uses `docker-compose.test.yaml`, selects an available
 local port, waits for database readiness, and runs the repository tests.
 Containers, network, and volumes are removed after success, failure, or interruption.
 Each test applies the project migration in a separate schema and cleans it up afterward.

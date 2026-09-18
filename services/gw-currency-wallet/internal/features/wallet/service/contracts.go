@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"wallet-app/internal/core/domain"
+
+	"github.com/google/uuid"
 )
 
 type Repository interface {
@@ -11,4 +13,4 @@ type Repository interface {
 	ApplyOperation(ctx context.Context, operation domain.WalletOperation) error
 }
 
-type WalletIDGenerator func() (domain.WalletID, error)
+type WalletIDGenerator func() uuid.UUID

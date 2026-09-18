@@ -14,3 +14,14 @@ var (
 	ErrSmallBalance    = errors.New("insufficient funds on the balance")
 	ErrBalanceOverflow = errors.New("balance overflow")
 )
+
+var (
+	ErrInvalidUsername       = errors.New("invalid username")
+	ErrInvalidEmailAddress   = errors.New("invalid email address")
+	ErrInvalidUserID         = errors.New("invalid user id")
+	ErrInvalidPasswordHash   = errors.New("invalid password hash")
+	ErrUserNotFound          = errors.New("user is not found")
+	ErrUsernameAlreadyExists = errors.New("username already exists")
+	ErrEmailAlreadyExists    = errors.New("email already exists")
+	ErrInvalidPassword       = errors.New("invalid password")
+)

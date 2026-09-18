@@ -18,7 +18,8 @@ func New(repository Repository, walletIDGenerator WalletIDGenerator) *Service {
 }
 
 func (s *Service) CreateNewWallet(ctx context.Context) (domain.Wallet, error) {
-	walletID, err := s.walletIDGenerator()
+	id := s.walletIDGenerator()
+	walletID, err := domain.NewWalletID(id)
 	if err != nil {
 		return domain.Wallet{}, err
 	}

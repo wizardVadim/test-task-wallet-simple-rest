@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 	"wallet-app/internal/core/config"
+	"wallet-app/internal/core/infrastructure/id"
 	"wallet-app/internal/features/wallet/repository"
 	"wallet-app/internal/features/wallet/service"
 	wallet_http "wallet-app/internal/features/wallet/transport/http"
@@ -64,7 +65,7 @@ func RunWithConfig(config config.Config, logger *slog.Logger) error {
 
 	walletRepository := repository.NewPostgresRepository(pool)
 
-	walletService := service.New(walletRepository, service.GenerateWalletID)
+	walletService := service.New(walletRepository, id.GenerateUUID)
 
 	walletHandler := wallet_http.New(walletService)
 

@@ -50,15 +50,13 @@ func mustWalletID(t *testing.T) domain.WalletID {
 }
 
 func TestCreateNewWallet(t *testing.T) {
-	generatorErr := errors.New("generator failed")
 	repositoryErr := errors.New("repository failed")
 	for _, tt := range []struct {
-		name                                 string
-		generatorErr, repositoryErr, wantErr error
-		wantRepoCalls                        int
+		name                   string
+		repositoryErr, wantErr error
+		wantRepoCalls          int
 	}{
 		{name: "success", wantRepoCalls: 1},
-		{name: "generator error", generatorErr: generatorErr, wantErr: generatorErr},
 		{name: "repository error", repositoryErr: repositoryErr, wantErr: repositoryErr, wantRepoCalls: 1},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -68,7 +66,7 @@ func TestCreateNewWallet(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			generatorCalls, repoCalls := 0, 0
+			repoCalls := 0
 			repo := &repositoryStub{t: t, create: func(gotCtx context.Context, gotID domain.WalletID) (domain.Wallet, error) {
 				repoCalls++
 				if gotCtx != ctx || gotID != id {
@@ -79,12 +77,8 @@ func TestCreateNewWallet(t *testing.T) {
 				}
 				return want, nil
 			}}
-			svc := service.New(repo, func() (domain.WalletID, error) {
-				generatorCalls++
-				if tt.generatorErr != nil {
-					return domain.WalletID{}, tt.generatorErr
-				}
-				return id, nil
+			svc := service.New(repo, func() uuid.UUID {
+				return id.Value()
 			})
 			got, err := svc.CreateNewWallet(ctx)
 			if !errors.Is(err, tt.wantErr) {
@@ -96,8 +90,8 @@ func TestCreateNewWallet(t *testing.T) {
 			if got != want {
 				t.Fatalf("wallet = %+v; want %+v", got, want)
 			}
-			if generatorCalls != 1 || repoCalls != tt.wantRepoCalls {
-				t.Fatalf("generator calls = %d, repository calls = %d; want 1, %d", generatorCalls, repoCalls, tt.wantRepoCalls)
+			if repoCalls != tt.wantRepoCalls {
+				t.Fatalf("repository calls = %d; want 1, %d", repoCalls, tt.wantRepoCalls)
 			}
 		})
 	}

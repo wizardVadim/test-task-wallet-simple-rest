@@ -7,30 +7,30 @@ import (
 	"log/slog"
 	"os"
 
-	"wallet-app/internal/app"
-	"wallet-app/internal/core/config"
+	"exchanger-app/internal/app"
+	"exchanger-app/internal/core/config"
 )
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
-		slog.New(slog.NewJSONHandler(os.Stderr, nil)).Error("wallet stopped", "error", err.Error())
+		slog.New(slog.NewJSONHandler(os.Stderr, nil)).Error("exchanger stopped", "error", err.Error())
 		os.Exit(1)
 	}
 }
 
 func run(args []string) error {
-	flags := flag.NewFlagSet("wallet", flag.ContinueOnError)
+	flags := flag.NewFlagSet("exchanger", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	path := flags.String("c", "", "path to config.env (environment overrides file)")
 	if err := flags.Parse(args); err != nil {
 		if err == flag.ErrHelp {
-			fmt.Println("Usage: wallet [-c config.env]")
+			fmt.Println("Usage: exchanger [-c config.env]")
 			return nil
 		}
-		return fmt.Errorf("invalid arguments; usage: wallet [-c config.env]")
+		return fmt.Errorf("invalid arguments; usage: exchanger [-c config.env]")
 	}
 	if flags.NArg() != 0 {
-		return fmt.Errorf("unexpected arguments; usage: wallet [-c config.env]")
+		return fmt.Errorf("unexpected arguments; usage: exchanger [-c config.env]")
 	}
 	var cfg config.Config
 	var err error
@@ -42,6 +42,6 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel})).With("service", "gw-currency-wallet")
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel})).With("service", "gw-exchanger")
 	return app.RunWithConfig(cfg, logger)
 }

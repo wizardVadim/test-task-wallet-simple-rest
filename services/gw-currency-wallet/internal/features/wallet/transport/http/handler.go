@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 
 	"wallet-app/internal/core/domain"
@@ -54,7 +54,7 @@ func (h *Handler) GetWalletBalance(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		log.Printf("get wallet balance: %v", err)
+		slog.ErrorContext(r.Context(), "get wallet balance failed", "error", err)
 		writeJSON(w, http.StatusInternalServerError, ResponseDTO{
 			Error: &ErrorDTO{Message: ErrorGetBalanceInternal},
 		})
@@ -78,7 +78,7 @@ func (h *Handler) CreateWallet(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		log.Printf("create wallet: %v", err)
+		slog.ErrorContext(r.Context(), "create wallet failed", "error", err)
 		writeJSON(w, http.StatusInternalServerError, ResponseDTO{
 			Error: &ErrorDTO{Message: ErrorCreateWalletInternal},
 		})
@@ -152,7 +152,7 @@ func (h *Handler) ChangeWalletBalance(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		log.Printf("change wallet balance: %v", err)
+		slog.WarnContext(r.Context(), "change wallet balance failed", "error", err)
 		writeJSON(w, http.StatusBadRequest, ResponseDTO{
 			Error: &ErrorDTO{Message: ErrorInvalidRequestBody},
 		})
@@ -165,7 +165,7 @@ func (h *Handler) ChangeWalletBalance(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		log.Printf("change wallet balance: %v", err)
+		slog.WarnContext(r.Context(), "change wallet balance failed", "error", err)
 		writeJSON(w, http.StatusBadRequest, ResponseDTO{
 			Error: &ErrorDTO{Message: ErrorInvalidWalletID},
 		})
@@ -182,7 +182,7 @@ func (h *Handler) ChangeWalletBalance(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		log.Printf("change wallet balance: %v", err)
+		slog.WarnContext(r.Context(), "change wallet balance failed", "error", err)
 		writeJSON(w, http.StatusBadRequest, ResponseDTO{
 			Error: &ErrorDTO{Message: ErrorInvalidRequestBody},
 		})
@@ -227,18 +227,23 @@ func (h *Handler) ChangeWalletBalance(w http.ResponseWriter, r *http.Request) {
 			statusCode = http.StatusInternalServerError
 		}
 
-		log.Printf("change wallet balance: %v", err)
+		level := slog.LevelWarn
+		if statusCode >= 500 {
+			level = slog.LevelError
+		}
+		slog.Log(r.Context(), level, "change wallet balance failed", "error", err)
 		writeJSON(w, statusCode, response)
 		return
 	}
 
+	slog.InfoContext(r.Context(), "wallet balance changed", "wallet_id", walletID.Value().String(), "operation", operation.OperationType(), "amount", operation.Amount())
 	w.WriteHeader(http.StatusOK)
 }
 
 func writeJSON(w http.ResponseWriter, status int, response ResponseDTO) {
 	body, err := json.Marshal(response)
 	if err != nil {
-		log.Printf("marshal response: %v", err)
+		slog.Error("marshal response failed", "error", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -247,6 +252,6 @@ func writeJSON(w http.ResponseWriter, status int, response ResponseDTO) {
 	w.WriteHeader(status)
 
 	if _, err := w.Write(body); err != nil {
-		log.Printf("write response: %v", err)
+		slog.Warn("write response failed", "error", err)
 	}
 }

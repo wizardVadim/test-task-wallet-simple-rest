@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -20,13 +21,19 @@ import (
 )
 
 func Run() error {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
-	defer cancel()
-
-	config, err := config.Load()
+	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel})).With("service", "gw-currency-wallet")
+	return RunWithConfig(cfg, logger)
+}
+
+func RunWithConfig(config config.Config, logger *slog.Logger) error {
+	slog.SetDefault(logger)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	logger.Info("wallet starting")
 
 	connectionString := url.URL{
 		Scheme: "postgresql",
@@ -37,7 +44,7 @@ func Run() error {
 
 	poolConfig, err := pgxpool.ParseConfig(connectionString.String())
 	if err != nil {
-		return err
+		return errors.New("invalid database connection configuration")
 	}
 
 	poolConfig.MaxConns = int32(config.MaxDbConnections)
@@ -53,6 +60,8 @@ func Run() error {
 		return fmt.Errorf("ping database: %w", err)
 	}
 
+	logger.Debug("database connection established")
+
 	walletRepository := repository.NewPostgresRepository(pool)
 
 	walletService := service.New(walletRepository, service.GenerateWalletID)
@@ -66,13 +75,21 @@ func Run() error {
 	mux.HandleFunc("POST /api/v1/wallet", walletHandler.ChangeWalletBalance)
 
 	server := &http.Server{
-		Addr:              ":" + config.HTTPAddr,
-		Handler:           mux,
+		Addr:              ":" + config.HTTPPort,
+		Handler:           wallet_http.Logging(logger, mux),
+		ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelError),
 		ReadHeaderTimeout: time.Duration(config.ReadHeaderTimeout) * time.Second,
 		ReadTimeout:       time.Duration(config.ReadTimeout) * time.Second,
 		WriteTimeout:      time.Duration(config.WriteTimeout) * time.Second,
 		IdleTimeout:       time.Duration(config.IdleTimeout) * time.Second,
 	}
+
+	listener, err := net.Listen("tcp", server.Addr)
+	if err != nil {
+		return fmt.Errorf("listen http: %w", err)
+	}
+	defer listener.Close()
+	logger.Info("http server listening", "address", listener.Addr().String())
 
 	stopCtx, stop := signal.NotifyContext(
 		context.Background(),
@@ -84,7 +101,7 @@ func Run() error {
 	serverErr := make(chan error, 1)
 
 	go func() {
-		serverErr <- server.ListenAndServe()
+		serverErr <- server.Serve(listener)
 	}()
 
 	select {
@@ -95,6 +112,7 @@ func Run() error {
 		return fmt.Errorf("http server: %w", err)
 
 	case <-stopCtx.Done():
+		logger.Info("http shutdown started")
 		stop()
 
 		shutdownCtx, cancel := context.WithTimeout(
@@ -104,10 +122,12 @@ func Run() error {
 		defer cancel()
 
 		if err := server.Shutdown(shutdownCtx); err != nil {
+			logger.Warn("graceful shutdown failed; closing active connections")
 			_ = server.Close()
 			return fmt.Errorf("shutdown http server: %w", err)
 		}
 
+		logger.Info("http shutdown completed")
 		return nil
 	}
 }

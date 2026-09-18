@@ -16,15 +16,16 @@ cp example_config.env config.env
 docker compose --env-file config.env up --build -d
 ```
 
-Compose starts PostgreSQL, applies migrations using the migrate container,
+Compose starts `db-currency-wallet`, applies migrations using `migrate-wallet`,
 and starts the API after migrations succeed. No local Go or migrate installation
-is required for this workflow. The default API URL is `http://localhost:8080`.
+is required for this workflow. The full Compose stack also starts the exchanger database
+and its migrations, as well as the exchanger application. The default API URL is `http://localhost:8080`.
 
 Inspect startup status and logs:
 
 ```bash
 docker compose --env-file config.env ps -a
-docker compose --env-file config.env logs migrate wallet
+docker compose --env-file config.env logs migrate-wallet wallet
 ```
 
 Stop the application:
@@ -33,7 +34,7 @@ Stop the application:
 docker compose --env-file config.env down
 ```
 
-PostgreSQL data persists in `out/pg_data`. Local configuration and database data
+PostgreSQL data persists in `out/wallet_pg_data`. Local configuration and database data
 are excluded from Git. Database initialization settings apply to a new data directory;
 changing credentials in the env file does not update an existing database user.
 
@@ -45,24 +46,28 @@ make docker-stop
 make docker-rebuild
 ```
 
-Use `docker-rebuild` after changing application code; restarting an existing
+`docker-rebuild` rebuilds both applications. To rebuild wallet only, run
+`docker compose --env-file config.env up -d --build wallet`. Restarting an existing
 container does not rebuild its image.
 
 ## Configuration
 
 Copy `example_config.env` to `config.env` before starting the application.
 Compose passes the file's variables to the API, which reads them from its environment.
+For direct local execution, `-c config.env` reads the file without exporting it;
+explicit environment variables override file values.
 
 | Variable | Purpose | Example |
 |---|---|---|
 | `POSTGRES_USER` | Database user | `test_user` |
 | `POSTGRES_PASSWORD` | Database password | `test_pass` |
-| `POSTGRES_HOST` | Database host inside Compose | `db` |
+| `POSTGRES_HOST` | Database host inside Compose | `db-currency-wallet` |
 | `POSTGRES_NAME` | Database name | `bank` |
 | `POSTGRES_PORT` | Published database port for local connections | `5432` |
-| `HTTP_ADDR` | API listening port, without a colon | `8080` |
-| `HTTP_PORT` | Published API port on the host | `8080` |
-| `MAX_DB_CONNECTIONS` | Maximum connections in the API database pool | `1` |
+| `HTTP_PORT` | API listening port, without a colon | `8080` |
+| `HTTP_OUT_PORT` | Published API port on the host | `8080` |
+| `LOG_LEVEL_WALLET` | Optional JSON log level: DEBUG, INFO, WARN, ERROR | `INFO` |
+| `MAX_DB_CONNECTIONS` | Maximum connections in the API database pool | `4` |
 | `MIN_DB_CONNECTIONS` | Minimum connections maintained by the pool | `1` |
 | `READ_HEADER_TIMEOUT` | HTTP request header read timeout, in seconds | `5` |
 | `READ_TIMEOUT` | Entire HTTP request read timeout, in seconds | `5` |
@@ -70,9 +75,10 @@ Compose passes the file's variables to the API, which reads them from its enviro
 | `IDLE_TIMEOUT` | HTTP keep-alive idle timeout, in seconds | `120` |
 
 The API container overrides `POSTGRES_PORT` to `5432`, the PostgreSQL port inside
-Compose. HTTP ports are mapped as `HTTP_PORT:HTTP_ADDR`.
+Compose. HTTP ports are mapped as `HTTP_OUT_PORT:HTTP_PORT`.
 
-All settings listed above must be supplied. Pool limits and timeouts must be
+The application requires all settings above except `LOG_LEVEL_WALLET` and
+`HTTP_OUT_PORT`; the latter is used only by Compose. Pool limits and timeouts must be
 integers. `MAX_DB_CONNECTIONS` must be between 1 and 2147483647;
 `MIN_DB_CONNECTIONS` must be between 0 and `MAX_DB_CONNECTIONS`, inclusive.
 Timeouts must be positive and fit in a Go duration when converted from seconds
@@ -207,21 +213,38 @@ Requires a Go toolchain compatible with the root `go.work` and this service’s 
 apply migrations, then run the API locally:
 
 ```bash
-docker compose --env-file config.env up -d db migrate
-docker compose --env-file config.env wait migrate
-make local-run-go
+make db-wallet
+make local-run-wallet
 ```
 
 Ensure migrations succeeded before running the API. Stop any existing `wallet`
 container if it occupies the local API port. The Make target loads `config.env`
-and overrides `POSTGRES_HOST` to `localhost`. Locally the API listens on `HTTP_ADDR`.
+and overrides `POSTGRES_HOST` to `localhost`. Locally the API listens on `HTTP_PORT`.
+
+Alternatively, run from the repository root with file configuration:
+
+```bash
+POSTGRES_HOST=localhost go run ./services/gw-currency-wallet/cmd -c config.env
+```
+
+Without `-c`, the application reads only environment variables. The existing
+`make local-run-go` target remains supported.
+
+## Logging
+
+The application writes JSON logs with `service=gw-currency-wallet`. Set
+`LOG_LEVEL_WALLET` to `DEBUG`, `INFO` (default), `WARN` or `ERROR`.
+Logs cover startup, shutdown, HTTP outcomes and successful balance changes.
+HTTP records include method, route pattern, status and duration; request bodies,
+query strings and authorization headers are not included. Startup failures go to
+stderr; regular application logs go to stdout.
 
 ## Tests
 
 Run unit tests without PostgreSQL:
 
 ```bash
-make local-test-go
+make test-wallet
 ```
 
 Repository integration tests are skipped unless `TEST_DATABASE_URL` is set.
@@ -233,7 +256,7 @@ make integration-test
 ```
 
 Requires Go, Make, Docker Compose with `up --wait` support, and a running local
-Docker daemon. The command uses `docker-compose.test.yaml`, selects an available
+Docker daemon. The target covers wallet and exchanger repositories. The command uses `docker-compose.test.yaml`, selects an available
 local port, waits for database readiness, and runs the repository tests.
 Containers, network, and volumes are removed after success, failure, or interruption.
 Each test applies the project migration in a separate schema and cleans it up afterward.

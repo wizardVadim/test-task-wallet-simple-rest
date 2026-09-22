@@ -11,7 +11,7 @@ import (
 
 func clearWalletEnv(t *testing.T) {
 	t.Helper()
-	for _, key := range []string{"POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_NAME", "HTTP_PORT", "MAX_DB_CONNECTIONS", "MIN_DB_CONNECTIONS", "READ_HEADER_TIMEOUT", "READ_TIMEOUT", "WRITE_TIMEOUT", "IDLE_TIMEOUT", "LOG_LEVEL_WALLET"} {
+	for _, key := range []string{"POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_NAME", "HTTP_PORT", "MAX_DB_CONNECTIONS", "MIN_DB_CONNECTIONS", "READ_HEADER_TIMEOUT", "READ_TIMEOUT", "WRITE_TIMEOUT", "IDLE_TIMEOUT", "LOG_LEVEL_WALLET", "JWT_SECRET_KEY", "JWT_TTL"} {
 		t.Setenv(key, "")
 		if err := os.Unsetenv(key); err != nil {
 			t.Fatal(err)
@@ -41,6 +41,8 @@ READ_TIMEOUT=5
 WRITE_TIMEOUT=20
 IDLE_TIMEOUT=120
 LOG_LEVEL_WALLET=DEBUG
+JWT_SECRET_KEY=0123456789abcdef0123456789abcdef
+JWT_TTL=24
 `
 
 func TestLoadFileAndEnvironmentPrecedence(t *testing.T) {
@@ -86,6 +88,40 @@ func TestLogLevel(t *testing.T) {
 			_, err := config.Load()
 			if (err != nil) != (level == "invalid") {
 				t.Fatalf("level %s: %v", level, err)
+			}
+		})
+	}
+}
+
+func TestJWTFileAndEnvironmentPrecedence(t *testing.T) {
+	clearWalletEnv(t)
+	path := writeConfig(t, fileConfig)
+	got, err := config.LoadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Authorization.JwtTTL != 24 || got.Authorization.JwtSecretKey != "0123456789abcdef0123456789abcdef" {
+		t.Fatal("JWT file values not loaded")
+	}
+	for _, key := range []string{"JWT_SECRET_KEY", "JWT_TTL"} {
+		if _, ok := os.LookupEnv(key); ok {
+			t.Errorf("LoadFile mutated %s", key)
+		}
+	}
+	t.Setenv("JWT_SECRET_KEY", strings.Repeat("x", 32))
+	t.Setenv("JWT_TTL", "2")
+	got, err = config.LoadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Authorization.JwtTTL != 2 || got.Authorization.JwtSecretKey != strings.Repeat("x", 32) {
+		t.Fatal("environment did not override JWT file values")
+	}
+	for _, key := range []string{"JWT_SECRET_KEY", "JWT_TTL"} {
+		t.Run(key, func(t *testing.T) {
+			t.Setenv(key, "")
+			if _, err := config.LoadFile(path); err == nil || !strings.Contains(err.Error(), key) {
+				t.Errorf("explicit empty %s must fail: %v", key, err)
 			}
 		})
 	}

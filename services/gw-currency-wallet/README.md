@@ -13,6 +13,7 @@ Requires Docker and Docker Compose. Run commands from the repository root:
 
 ```bash
 cp example_config.env config.env
+# Set your own JWT_SECRET_KEY in config.env before starting.
 docker compose --env-file config.env up --build -d
 ```
 
@@ -52,6 +53,11 @@ container does not rebuild its image.
 
 ## Configuration
 
+Set `JWT_SECRET_KEY` to a random secret of at least 32 bytes; `openssl rand -hex 32`
+can generate one. Replace the placeholder in `config.env` and keep this file out
+of Git. Changing the signing key invalidates previously issued tokens.
+
+
 Copy `example_config.env` to `config.env` before starting the application.
 Compose passes the file's variables to the API, which reads them from its environment.
 For direct local execution, `-c config.env` reads the file without exporting it;
@@ -66,6 +72,8 @@ explicit environment variables override file values.
 | `POSTGRES_PORT` | Published database port for local connections | `5432` |
 | `HTTP_PORT` | API listening port, without a colon | `8080` |
 | `HTTP_OUT_PORT` | Published API port on the host | `8080` |
+| `JWT_SECRET_KEY` | Required HS256 signing secret, at least 32 bytes | Your own random secret |
+| `JWT_TTL` | Required positive integer lifetime in hours | `24` |
 | `LOG_LEVEL_WALLET` | Optional JSON log level: DEBUG, INFO, WARN, ERROR | `INFO` |
 | `MAX_DB_CONNECTIONS` | Maximum connections in the API database pool | `4` |
 | `MIN_DB_CONNECTIONS` | Minimum connections maintained by the pool | `1` |
@@ -83,6 +91,8 @@ integers. `MAX_DB_CONNECTIONS` must be between 1 and 2147483647;
 `MIN_DB_CONNECTIONS` must be between 0 and `MAX_DB_CONNECTIONS`, inclusive.
 Timeouts must be positive and fit in a Go duration when converted from seconds
 (at most 9223372036 seconds). These are validation limits, not recommended tuning values.
+`JWT_TTL` accepts integer hours from 1 to 2562047; values such as `24h` or `1.5`
+are rejected. Its conversion to a duration is checked for overflow.
 Invalid pool or timeout settings cause startup to fail with the variable name in the error.
 
 To compare pool sizes, change `MAX_DB_CONNECTIONS` in `config.env`, keeping
@@ -99,6 +109,56 @@ errors, and final balances. Increasing the pool size does not guarantee higher t
 when all updates target the same wallet. `WRITE_TIMEOUT` controls response writes;
 it does not set a database query timeout.
 
+## Authentication
+
+`POST /api/v1/register` and `POST /api/v1/login` are public. All three wallet
+routes below require `Authorization: Bearer <token>`. Missing, invalid or expired
+tokens receive `401 Unauthorized` with an empty body.
+
+Wallets currently have no owner relationship. A valid token permits access to any
+wallet ID; restricting users to their own balances is planned with multicurrency wallets.
+Registration creates a user only; it does not create a wallet.
+
+### Register
+
+```bash
+curl -i -X POST http://localhost:8080/api/v1/register \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"ivan","email":"ivan@example.com","password":"example-password"}'
+```
+
+Success: `201 Created`, `{"message":"User registered successfully"}`.
+Username is trimmed and lowercased. Email syntax is checked and email uniqueness
+is case-insensitive. Passwords must be nonblank and at most 72 bytes, not characters;
+spaces in an otherwise valid password are preserved. Passwords are stored as bcrypt hashes.
+Duplicate username or email: `400`, `{"error":"Username or email already exists"}`.
+Other invalid registration fields also return `400` with an `error` string.
+
+### Log in
+
+```bash
+curl -i -X POST http://localhost:8080/api/v1/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"ivan","password":"example-password"}'
+```
+
+Success: `200 OK`, `{"token":"<JWT>"}`. Copy the returned token for subsequent examples:
+
+```bash
+TOKEN='<JWT returned by login>'
+```
+
+Invalid credentials or invalid password: `401`,
+`{"error":"Invalid username or password"}`. Unexpected internal errors return
+`500`, `{"error":"internal server error"}`. Both auth endpoints accept one JSON
+value with a 4096-byte limit: malformed input returns `400`, oversized input `413`.
+Auth errors use `{"error":"..."}`, unlike the wallet error envelope below.
+
+JWTs use HS256 with `sub` (user ID), `iat` (issued at), and `exp` (expiry).
+There is no refresh-token or individual-token revocation endpoint; log in again
+when the token expires. Middleware verifies the signature, algorithm and expiry,
+then passes a nonzero UUID user ID through the request context.
+
 ## API
 
 Amounts and balances are integers in minor monetary units: `100` represents
@@ -112,7 +172,8 @@ zero to `9223372036854775807`; overdrafts are not supported.
 No request body is required.
 
 ```bash
-curl -i -X POST http://localhost:8080/api/v1/wallets
+curl -i -X POST http://localhost:8080/api/v1/wallets \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 Returns `201 Created` and a `Location` header pointing to the wallet's GET endpoint:
@@ -137,7 +198,8 @@ WALLET_ID='63e8c3d9-e907-4739-b2d0-6c751a887b4a'
 `GET /api/v1/wallets/{wallet_uuid}` returns `200 OK`:
 
 ```bash
-curl -i "http://localhost:8080/api/v1/wallets/$WALLET_ID"
+curl -i "http://localhost:8080/api/v1/wallets/$WALLET_ID" \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ```json
@@ -164,6 +226,7 @@ Deposit:
 
 ```bash
 curl -i -X POST http://localhost:8080/api/v1/wallet \
+  -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   -d "{\"walletId\":\"$WALLET_ID\",\"operationType\":\"DEPOSIT\",\"amount\":1000}"
 ```
@@ -172,6 +235,7 @@ Withdraw:
 
 ```bash
 curl -i -X POST http://localhost:8080/api/v1/wallet \
+  -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   -d "{\"walletId\":\"$WALLET_ID\",\"operationType\":\"WITHDRAW\",\"amount\":1000}"
 ```
@@ -182,7 +246,7 @@ Each accepted POST is a separate operation; automatic retries can apply it again
 
 ## Error responses
 
-Handler errors use this JSON envelope:
+Wallet handler errors use this JSON envelope (authentication failures are described above):
 
 ```json
 {
@@ -256,16 +320,19 @@ make integration-test
 ```
 
 Requires Go, Make, Docker Compose with `up --wait` support, and a running local
-Docker daemon. The target covers wallet and exchanger repositories. The command uses `docker-compose.test.yaml`, selects an available
+Docker daemon. The target covers wallet, auth and exchanger repositories. The command uses `docker-compose.test.yaml`, selects an available
 local port, waits for database readiness, and runs the repository tests.
 Containers, network, and volumes are removed after success, failure, or interruption.
 Each test applies the project migration in a separate schema and cleans it up afterward.
 These tests do not use `config.env` or the development database.
 
-Coverage includes domain validation, configuration, service error propagation,
+Coverage includes registration/login, bcrypt, JWT validation, authentication middleware,
+JWT configuration precedence and bounds, domain validation, service error propagation,
 HTTP responses, atomic balance updates, balance limits, and concurrent deposits.
 
 ## Load testing
+
+The results below predate JWT authentication and do not measure the current authenticated API.
 
 Two local Vegeta runs were reported against a single wallet, each configured
 for 1,000 requests per second over 60 seconds with an operation amount of 1.
@@ -301,7 +368,10 @@ at an offered rate of 1,000 requests/sec. Completion continued for roughly
 
 Run the direct Vegeta commands below from `services/gw-currency-wallet/` with Vegeta installed and the API running.
 From the repository root, first run `cd services/gw-currency-wallet`.
-Set the wallet UUID in the request body files and adjust the target URL if needed:
+Set the wallet UUID in the request body files and adjust the target URL if needed.
+Add `Authorization: Bearer <token>` to each Vegeta target file, immediately after
+the request line, using a token from login. This is also required by the Make
+load-test targets. Do not commit real tokens. Without this header requests return 401:
 
 ```bash
 vegeta attack -targets=./loadtests/vegeta_targets_add_balance.txt -rate=1000 -duration=60s | vegeta report

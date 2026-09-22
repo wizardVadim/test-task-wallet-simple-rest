@@ -5,8 +5,10 @@ Go monorepo with two services:
 - [gw-currency-wallet](services/gw-currency-wallet/README.md): wallet REST API with PostgreSQL.
 - [gw-exchanger](services/gw-exchanger/README.md): gRPC exchange rates from a separate PostgreSQL database.
 
-Wallet currently supports anonymous wallets, balance reads, deposits and withdrawals.
-Connecting wallet to exchanger, authentication, multicurrency balances, Kafka,
+Wallet supports registration, login with JWT, and authenticated wallet creation,
+balance reads, deposits and withdrawals. Wallets are not yet linked to users:
+any authenticated user can access a wallet by its ID. Ownership checks and
+multicurrency balances are the next stage. Connecting wallet to exchanger, Kafka,
 notifications and analytics are still planned.
 
 ## Structure
@@ -30,10 +32,18 @@ On first setup, create the configuration (keep an existing `config.env`):
 
 ```bash
 cp example_config.env config.env
+# Set your own JWT_SECRET_KEY in config.env before starting (see below).
 make docker-rebuild
 docker compose --env-file config.env ps -a
 docker compose --env-file config.env logs wallet exchanger
 ```
+
+Set `JWT_SECRET_KEY` to your own random secret of at least 32 bytes; for example,
+use the output of `openssl rand -hex 32`. The example key is a placeholder.
+`JWT_TTL` is a positive integer number of hours (default example: `24`).
+Keep the secret in the ignored `config.env`. Wallet startup rejects invalid settings.
+See the [wallet API instructions](services/gw-currency-wallet/README.md#authentication)
+to register, log in and call protected endpoints.
 
 Each application starts after its database is healthy and its migration job succeeds.
 Settings in `example_config.env` use these addresses:
@@ -121,4 +131,5 @@ empty results, concurrent reads, invalid stored currencies, database constraints
 and migration rollback/reapplication. Each test uses its own schema.
 
 Wallet load-test targets remain `load-test-add-balance`, `load-test-minus-balance`
-and `load-test-get-balance`; they require Vegeta and run for 30 seconds.
+and `load-test-get-balance`; they require Vegeta and run for 30 seconds. Add a valid `Authorization: Bearer <token>`
+header to the target files before running them; existing targets have no token.

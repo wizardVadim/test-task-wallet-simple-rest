@@ -16,6 +16,8 @@ func setValidEnv(t *testing.T) {
 	t.Helper()
 	for key, value := range map[string]string{
 		"LOG_LEVEL_WALLET":    "INFO",
+		"JWT_SECRET_KEY":      "0123456789abcdef0123456789abcdef",
+		"JWT_TTL":             "24",
 		"HTTP_PORT":           "8080",
 		"MAX_DB_CONNECTIONS":  "1",
 		"MIN_DB_CONNECTIONS":  "1",
@@ -41,6 +43,7 @@ func TestLoad(t *testing.T) {
 		t.Fatalf("Load() error = %v", err)
 	}
 	want := config.Config{
+		Authorization:     config.AuthConfig{JwtSecretKey: "0123456789abcdef0123456789abcdef", JwtTTL: 24},
 		HTTPPort:          "8080",
 		MaxDbConnections:  1,
 		MinDbConnections:  1,
@@ -63,7 +66,7 @@ func TestLoad(t *testing.T) {
 
 func TestLoadRequiredEnv(t *testing.T) {
 	keys := []string{
-		"HTTP_PORT",
+		"JWT_SECRET_KEY", "JWT_TTL", "HTTP_PORT",
 		"MAX_DB_CONNECTIONS",
 		"MIN_DB_CONNECTIONS",
 		"READ_HEADER_TIMEOUT",
@@ -164,6 +167,39 @@ func TestLoadNumericBoundaries(t *testing.T) {
 			for key, value := range tt.values {
 				if strconv.Itoa(actual[key]) != value {
 					t.Errorf("%s = %d; want %s", key, actual[key], value)
+				}
+			}
+		})
+	}
+}
+
+func TestJWTLifetime(t *testing.T) {
+	maxHours := math.MaxInt64 / int64(time.Hour)
+	for _, tt := range []struct {
+		value string
+		valid bool
+	}{
+		{"1", true}, {"24", true}, {strconv.FormatInt(maxHours, 10), true},
+		{"0", false}, {"-1", false}, {"abc", false}, {"1.5", false}, {"24h", false},
+		{strconv.FormatInt(maxHours+1, 10), false}, {"9999999999999999999999999", false},
+	} {
+		t.Run(tt.value, func(t *testing.T) {
+			setValidEnv(t)
+			t.Setenv("JWT_TTL", tt.value)
+			got, err := config.Load()
+			if tt.valid {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if strconv.Itoa(got.Authorization.JwtTTL) != tt.value {
+					t.Error("incorrect JWT TTL")
+				}
+			} else {
+				if err == nil || !strings.Contains(err.Error(), "JWT_TTL") {
+					t.Errorf("error = %v; want JWT_TTL error", err)
+				}
+				if got != (config.Config{}) {
+					t.Error("nonzero config on error")
 				}
 			}
 		})

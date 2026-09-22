@@ -69,7 +69,7 @@ func RunWithConfig(config config.Config, logger *slog.Logger) error {
 	logger.Debug("database connection established")
 
 	hasher := hash.New()
-	tokenGenerator, err := token.NewJWTGenerator("testdsgfjdsigjdsifhdsjhfaedjdhgrjehagreuqh", time.Hour*24) // TODO: поменять на данные из конфига
+	tokenGenerator, err := token.NewJWTGenerator(config.Authorization.JwtSecretKey, time.Hour*time.Duration(config.Authorization.JwtTTL))
 	if err != nil {
 		return fmt.Errorf("%w: invalid token generator config", err)
 	}
@@ -85,9 +85,9 @@ func RunWithConfig(config config.Config, logger *slog.Logger) error {
 
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("POST /api/v1/wallets", walletHandler.CreateWallet)
-	mux.HandleFunc("GET /api/v1/wallets/{wallet_uuid}", walletHandler.GetWalletBalance)
-	mux.HandleFunc("POST /api/v1/wallet", walletHandler.ChangeWalletBalance)
+	mux.Handle("POST /api/v1/wallets", auth_http.Authenticate(tokenGenerator, http.HandlerFunc(walletHandler.CreateWallet)))
+	mux.Handle("GET /api/v1/wallets/{wallet_uuid}", auth_http.Authenticate(tokenGenerator, http.HandlerFunc(walletHandler.GetWalletBalance)))
+	mux.Handle("POST /api/v1/wallet", auth_http.Authenticate(tokenGenerator, http.HandlerFunc(walletHandler.ChangeWalletBalance)))
 	mux.HandleFunc("POST /api/v1/register", authHandler.Register)
 	mux.HandleFunc("POST /api/v1/login", authHandler.Login)
 

@@ -2,12 +2,13 @@ package config
 
 import (
 	"fmt"
-	"github.com/joho/godotenv"
 	"log/slog"
 	"math"
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/joho/godotenv"
 )
 
 type Config struct {
@@ -20,6 +21,7 @@ type Config struct {
 	ReadTimeout       int
 	WriteTimeout      int
 	IdleTimeout       int
+	Authorization     AuthConfig
 }
 
 type DBConfig struct {
@@ -28,6 +30,11 @@ type DBConfig struct {
 	User     string
 	Password string
 	Name     string
+}
+
+type AuthConfig struct {
+	JwtSecretKey string
+	JwtTTL       int
 }
 
 // LoadFile reads dotenv settings; explicitly set environment variables take precedence.
@@ -60,6 +67,8 @@ func load(getenv func(string) string) (Config, error) {
 		"READ_TIMEOUT",
 		"WRITE_TIMEOUT",
 		"IDLE_TIMEOUT",
+		"JWT_SECRET_KEY",
+		"JWT_TTL",
 	}
 
 	for _, key := range required {
@@ -93,6 +102,11 @@ func load(getenv func(string) string) (Config, error) {
 		return Config{}, fmt.Errorf("IDLE_TIMEOUT: cannot convert variable: %w", err)
 	}
 
+	jwtTTL, err := strconv.Atoi(getenv("JWT_TTL"))
+	if err != nil {
+		return Config{}, fmt.Errorf("JWT_TTL: cannot convert variable: %w", err)
+	}
+
 	config := Config{
 		HTTPPort:          getenv("HTTP_PORT"),
 		MaxDbConnections:  maxDbConnections,
@@ -107,6 +121,10 @@ func load(getenv func(string) string) (Config, error) {
 			User:     getenv("POSTGRES_USER"),
 			Password: getenv("POSTGRES_PASSWORD"),
 			Name:     getenv("POSTGRES_NAME"),
+		},
+		Authorization: AuthConfig{
+			JwtSecretKey: getenv("JWT_SECRET_KEY"),
+			JwtTTL:       jwtTTL,
 		},
 	}
 
@@ -141,6 +159,9 @@ func (config Config) validate() error {
 	}
 	if config.IdleTimeout < 1 || int64(config.IdleTimeout) > math.MaxInt64/int64(time.Second) {
 		return fmt.Errorf("IDLE_TIMEOUT error: %v", errInvalidSettingValue)
+	}
+	if config.Authorization.JwtTTL < 1 || int64(config.Authorization.JwtTTL) > math.MaxInt64/int64(time.Hour) {
+		return fmt.Errorf("JWT_TTL error: %v", errInvalidSettingValue)
 	}
 	return nil
 }

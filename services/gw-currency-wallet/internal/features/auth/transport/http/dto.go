@@ -10,10 +10,6 @@ type RegistrationSuccessResponse struct {
 	Message string `json:"message"`
 }
 
-type RegistrationErrorResponse struct {
-	Error ErrorMessage `json:"error"`
-}
-
 type ErrorMessage string
 
 const (
@@ -36,6 +32,6 @@ type LoginSuccessResponse struct {
 	Token string `json:"token"`
 }
 
-type LoginErrorResponse struct {
+type ErrorResponse struct {
 	Error ErrorMessage `json:"error"`
 }

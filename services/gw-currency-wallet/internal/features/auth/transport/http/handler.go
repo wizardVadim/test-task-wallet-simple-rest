@@ -200,7 +200,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 			response = ErrorResponse{
 				Error: ErrorInvalidUserCredentials,
 			}
-			statusCode = http.StatusBadRequest
+			statusCode = http.StatusUnauthorized
 		} else {
 			response = ErrorResponse{
 				Error: ErrorInternalServerError,
@@ -218,7 +218,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.InfoContext(r.Context(), "login", "user_id", user.ID().String(), "email", user.Email(), "username", user.Username())
-	writeJSON(w, http.StatusCreated, LoginSuccessResponse{
+	writeJSON(w, http.StatusOK, LoginSuccessResponse{
 		Token: token,
 	})
 }

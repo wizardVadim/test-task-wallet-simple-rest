@@ -162,3 +162,138 @@ func TestRegisterPasswordTooLong(t *testing.T) {
 		t.Errorf("unexpected response: %v", got)
 	}
 }
+
+func TestLoginSuccess(t *testing.T) {
+	user, err := domain.NewUser(uuid.New(), "ivan", "ivan@example.com", "stored-hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/login", strings.NewReader(`{"username":" IvAn ","password":" secret "}`))
+	calls := 0
+	handler := authhttp.New(authStub{login: func(ctx context.Context, username, password string) (domain.User, string, error) {
+		calls++
+		if ctx != request.Context() || username != " IvAn " || password != " secret " {
+			t.Error("incorrect service arguments")
+		}
+		return user, "signed-token", nil
+	}})
+	response := httptest.NewRecorder()
+	handler.Login(response, request)
+	if calls != 1 {
+		t.Errorf("Login calls = %d; want 1", calls)
+	}
+	assertLoginResponse(t, response, http.StatusOK, "token", "signed-token")
+}
+
+func assertLoginResponse(t *testing.T, response *httptest.ResponseRecorder, status int, field, value string) {
+	t.Helper()
+	if response.Code != status {
+		t.Errorf("status = %d; want %d", response.Code, status)
+	}
+	if response.Header().Get("Content-Type") != "application/json" {
+		t.Error("missing JSON content type")
+	}
+	var body map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body) != 1 || body[field] != value {
+		t.Errorf("unexpected response: %v", body)
+	}
+}
+
+func TestLoginServiceErrors(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		err     error
+		status  int
+		message string
+	}{
+		{"invalid credentials", domain.ErrInvalidUserCredentials, 401, "Invalid username or password"},
+		{"invalid password", domain.ErrInvalidPassword, 401, "Invalid username or password"},
+		{"internal error", errors.New("private database error"), 500, "internal server error"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := authhttp.New(authStub{login: func(context.Context, string, string) (domain.User, string, error) {
+				return domain.User{}, "", fmt.Errorf("login: %w", tt.err)
+			}})
+			response := httptest.NewRecorder()
+			handler.Login(response, httptest.NewRequest(http.MethodPost, "/api/v1/login", strings.NewReader(`{"username":"ivan","password":"secret"}`)))
+			assertLoginResponse(t, response, tt.status, "error", tt.message)
+		})
+	}
+}
+
+func TestLoginInvalidJSON(t *testing.T) {
+	for _, tt := range []struct {
+		name, body string
+		status     int
+	}{
+		{"empty", "", 400}, {"malformed", "{", 400}, {"array", "[]", 400},
+		{"wrong username type", `{"username":123}`, 400}, {"wrong password type", `{"password":123}`, 400},
+		{"multiple values", `{} {}`, 400}, {"trailing garbage", `{} x`, 400},
+		{"oversized", `{"password":"` + strings.Repeat("x", 4096) + `"}`, 413},
+		{"oversized whitespace", `{}` + strings.Repeat(" ", 4096), 413},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := authhttp.New(authStub{login: func(context.Context, string, string) (domain.User, string, error) {
+				t.Fatal("Login called for invalid JSON")
+				return domain.User{}, "", nil
+			}})
+			response := httptest.NewRecorder()
+			handler.Login(response, httptest.NewRequest(http.MethodPost, "/api/v1/login", strings.NewReader(tt.body)))
+			message := "invalid request body"
+			if tt.status == 413 {
+				message = "request body too large"
+			}
+			assertLoginResponse(t, response, tt.status, "error", message)
+		})
+	}
+}
+
+func TestLoginCanceledContext(t *testing.T) {
+	for _, before := range []bool{true, false} {
+		name := "during service"
+		if before {
+			name = "before handler"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			if before {
+				cancel()
+			}
+			calls := 0
+			handler := authhttp.New(authStub{login: func(context.Context, string, string) (domain.User, string, error) {
+				calls++
+				cancel()
+				return domain.User{}, "", context.Canceled
+			}})
+			response := httptest.NewRecorder()
+			handler.Login(response, httptest.NewRequest(http.MethodPost, "/api/v1/login", strings.NewReader(`{}`)).WithContext(ctx))
+			wantCalls := 1
+			if before {
+				wantCalls = 0
+			}
+			if calls != wantCalls {
+				t.Errorf("Login calls = %d; want %d", calls, wantCalls)
+			}
+			if response.Body.Len() != 0 || len(response.Header()) != 0 {
+				t.Error("response written after cancellation")
+			}
+		})
+	}
+}
+
+func TestLoginInvalidPasswordThroughService(t *testing.T) {
+	for _, password := range []string{"", " \t", strings.Repeat("я", 36) + "a"} {
+		handler := authhttp.New(service.New(nil, nil, passwordhash.New(), nil))
+		body, err := json.Marshal(map[string]string{"username": "ivan", "password": password})
+		if err != nil {
+			t.Fatal(err)
+		}
+		response := httptest.NewRecorder()
+		handler.Login(response, httptest.NewRequest(http.MethodPost, "/api/v1/login", strings.NewReader(string(body))))
+		assertLoginResponse(t, response, 401, "error", "Invalid username or password")
+	}
+}

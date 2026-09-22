@@ -13,7 +13,12 @@ import (
 	"syscall"
 	"time"
 	"wallet-app/internal/core/config"
+	"wallet-app/internal/core/infrastructure/hash"
 	"wallet-app/internal/core/infrastructure/id"
+	"wallet-app/internal/core/infrastructure/token"
+	auth_repository "wallet-app/internal/features/auth/repository"
+	auth_service "wallet-app/internal/features/auth/service"
+	auth_http "wallet-app/internal/features/auth/transport/http"
 	"wallet-app/internal/features/wallet/repository"
 	"wallet-app/internal/features/wallet/service"
 	wallet_http "wallet-app/internal/features/wallet/transport/http"
@@ -63,17 +68,28 @@ func RunWithConfig(config config.Config, logger *slog.Logger) error {
 
 	logger.Debug("database connection established")
 
+	hasher := hash.New()
+	tokenGenerator, err := token.NewJWTGenerator("testdsgfjdsigjdsifhdsjhfaedjdhgrjehagreuqh", time.Hour*24) // TODO: поменять на данные из конфига
+	if err != nil {
+		return fmt.Errorf("%w: invalid token generator config", err)
+	}
+
 	walletRepository := repository.NewPostgresRepository(pool)
+	authRepository := auth_repository.NewPostgresRepository(pool)
 
 	walletService := service.New(walletRepository, id.GenerateUUID)
+	authService := auth_service.New(authRepository, id.GenerateUUID, hasher, tokenGenerator)
 
 	walletHandler := wallet_http.New(walletService)
+	authHandler := auth_http.New(authService)
 
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("POST /api/v1/wallets", walletHandler.CreateWallet)
 	mux.HandleFunc("GET /api/v1/wallets/{wallet_uuid}", walletHandler.GetWalletBalance)
 	mux.HandleFunc("POST /api/v1/wallet", walletHandler.ChangeWalletBalance)
+	mux.HandleFunc("POST /api/v1/register", authHandler.Register)
+	mux.HandleFunc("POST /api/v1/login", authHandler.Login)
 
 	server := &http.Server{
 		Addr:              ":" + config.HTTPPort,

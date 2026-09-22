@@ -55,8 +55,10 @@ func TestCreateNewWallet(t *testing.T) {
 		name                   string
 		repositoryErr, wantErr error
 		wantRepoCalls          int
+		nilID                  bool
 	}{
 		{name: "success", wantRepoCalls: 1},
+		{name: "nil generated ID", nilID: true, wantErr: domain.ErrWalletValueIsEmpty},
 		{name: "repository error", repositoryErr: repositoryErr, wantErr: repositoryErr, wantRepoCalls: 1},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -66,7 +68,7 @@ func TestCreateNewWallet(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			repoCalls := 0
+			generatorCalls, repoCalls := 0, 0
 			repo := &repositoryStub{t: t, create: func(gotCtx context.Context, gotID domain.WalletID) (domain.Wallet, error) {
 				repoCalls++
 				if gotCtx != ctx || gotID != id {
@@ -78,6 +80,10 @@ func TestCreateNewWallet(t *testing.T) {
 				return want, nil
 			}}
 			svc := service.New(repo, func() uuid.UUID {
+				generatorCalls++
+				if tt.nilID {
+					return uuid.Nil
+				}
 				return id.Value()
 			})
 			got, err := svc.CreateNewWallet(ctx)
@@ -90,8 +96,11 @@ func TestCreateNewWallet(t *testing.T) {
 			if got != want {
 				t.Fatalf("wallet = %+v; want %+v", got, want)
 			}
+			if generatorCalls != 1 {
+				t.Errorf("generator calls = %d; want 1", generatorCalls)
+			}
 			if repoCalls != tt.wantRepoCalls {
-				t.Fatalf("repository calls = %d; want 1, %d", repoCalls, tt.wantRepoCalls)
+				t.Errorf("repository calls = %d; want %d", repoCalls, tt.wantRepoCalls)
 			}
 		})
 	}

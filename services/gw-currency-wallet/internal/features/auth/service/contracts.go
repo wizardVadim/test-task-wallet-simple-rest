@@ -17,4 +17,10 @@ type UserIDGenerator func() uuid.UUID
 type PasswordHasher interface {
 	Hash(string) (string, error)
 	Compare(string, hash string) error
+	MaxByteLength() int
+}
+
+type JWTGenerator interface {
+	Generate(string) (string, error)
+	Validate(string) (string, error)
 }

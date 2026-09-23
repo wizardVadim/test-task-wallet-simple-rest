@@ -31,4 +31,5 @@ var (
 var (
 	ErrInvalidCurrencyType  = errors.New("invalid currency type")
 	ErrInvalidBalanceAmount = errors.New("invalid balance amount")
+	ErrBalanceNotFound      = errors.New("balance not found")
 )

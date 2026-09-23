@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 
 	"wallet-app/internal/core/domain"
@@ -12,10 +13,12 @@ import (
 )
 
 type repositoryStub struct {
-	t      *testing.T
-	create func(context.Context, domain.WalletID) (domain.Wallet, error)
-	get    func(context.Context, domain.WalletID) (int64, error)
-	apply  func(context.Context, domain.WalletOperation) error
+	balances       func(context.Context, uuid.UUID) ([]domain.Balance, error)
+	t              *testing.T
+	create         func(context.Context, domain.WalletID) (domain.Wallet, error)
+	get            func(context.Context, domain.WalletID) (int64, error)
+	apply          func(context.Context, domain.WalletOperation) error
+	applyBalanceOp func(context.Context, domain.BalanceOperation) error
 }
 
 func (r *repositoryStub) CreateNewWallet(ctx context.Context, id domain.WalletID) (domain.Wallet, error) {
@@ -38,6 +41,13 @@ func (r *repositoryStub) ApplyOperation(ctx context.Context, operation domain.Wa
 		r.t.Fatal("unexpected ApplyOperation call")
 	}
 	return r.apply(ctx, operation)
+}
+func (r *repositoryStub) ApplyBalanceOperation(ctx context.Context, operation domain.BalanceOperation) error {
+	r.t.Helper()
+	if r.apply == nil {
+		r.t.Fatal("unexpected ApplyBalanceOperation call")
+	}
+	return r.applyBalanceOp(ctx, operation)
 }
 
 func mustWalletID(t *testing.T) domain.WalletID {
@@ -257,6 +267,72 @@ func TestChangeWalletBalance(t *testing.T) {
 					calls,
 					tt.wantCalls,
 				)
+			}
+		})
+	}
+}
+
+func (r *repositoryStub) GetBalances(ctx context.Context, id uuid.UUID) ([]domain.Balance, error) {
+	r.t.Helper()
+	if r.balances == nil {
+		r.t.Fatal("unexpected GetBalances call")
+	}
+	return r.balances(ctx, id)
+}
+
+func TestGetBalances(t *testing.T) {
+	id := uuid.New()
+	currency, err := domain.NewCurrency(domain.CurrencyTypeUSD)
+	if err != nil {
+		t.Fatal(err)
+	}
+	balance, err := domain.NewBalance(id, currency, 12345)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repoErr := errors.New("read balances failed")
+	for _, tt := range []struct {
+		name     string
+		balances []domain.Balance
+		err      error
+		canceled bool
+	}{
+		{name: "success", balances: []domain.Balance{balance}},
+		{name: "empty", balances: []domain.Balance{}},
+		{name: "repository error", err: repoErr},
+		{name: "canceled", err: context.Canceled, canceled: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			if tt.canceled {
+				cancel()
+			}
+			calls := 0
+			repo := &repositoryStub{t: t, balances: func(gotCtx context.Context, gotID uuid.UUID) ([]domain.Balance, error) {
+				calls++
+				if gotCtx != ctx || gotID != id {
+					t.Error("incorrect context or user ID")
+				}
+				return tt.balances, tt.err
+			}}
+			got, err := service.New(repo, nil).GetBalances(ctx, id)
+			if !errors.Is(err, tt.err) {
+				t.Errorf("error = %v; want %v", err, tt.err)
+			}
+			if tt.err != nil {
+				if len(got) != 0 {
+					t.Error("error returned balances")
+				}
+			} else if !reflect.DeepEqual(got, tt.balances) {
+				t.Error("incorrect balances")
+			}
+			wantCalls := 1
+			if tt.canceled {
+				wantCalls = 0
+			}
+			if calls != wantCalls {
+				t.Errorf("calls = %d; want %d", calls, wantCalls)
 			}
 		})
 	}

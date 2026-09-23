@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"wallet-app/internal/core/domain"
 
 	"github.com/google/uuid"
@@ -14,6 +15,7 @@ import (
 type DBTX interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Begin(ctx context.Context) (pgx.Tx, error)
 }
 
 type PostgresRepository struct {
@@ -31,13 +33,33 @@ func (repo *PostgresRepository) Create(ctx context.Context, user domain.User) er
 		return err
 	}
 
-	queryRow := `
+	queryInsertUserRow := `
 		INSERT INTO users (id, username, email, password_hash)
 		VALUES ($1, $2, $3, $4);
 	`
 
-	_, err := repo.db.Exec(ctx, queryRow, user.ID().String(), user.Username(), user.Email(), user.PasswordHash())
+	queryInsertBalancesRow := `
+		INSERT INTO balances (user_id, currency)
+		VALUES
+		($1, 'USD'),
+		($2, 'RUB'),
+		($3, 'EUR');
+	`
+
+	tx, err := repo.db.Begin(ctx)
 	if err != nil {
+		return fmt.Errorf("create user: %w", err)
+	}
+	defer func() {
+		if err := tx.Rollback(ctx); err != nil {
+			if errors.Is(err, pgx.ErrTxClosed) {
+				return
+			}
+			slog.ErrorContext(ctx, "create user: rollback error", "error", err)
+		}
+	}()
+
+	if _, err := tx.Exec(ctx, queryInsertUserRow, user.ID().String(), user.Username(), user.Email(), user.PasswordHash()); err != nil {
 		var pgErr *pgconn.PgError
 
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -49,6 +71,14 @@ func (repo *PostgresRepository) Create(ctx context.Context, user domain.User) er
 			}
 		}
 
+		return fmt.Errorf("create user: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx, queryInsertBalancesRow, user.ID().String(), user.ID().String(), user.ID().String()); err != nil {
+		return fmt.Errorf("create user: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("create user: %w", err)
 	}
 

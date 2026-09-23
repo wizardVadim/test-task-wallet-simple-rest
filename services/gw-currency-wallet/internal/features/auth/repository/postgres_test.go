@@ -56,12 +56,14 @@ func setupUsers(t *testing.T) (context.Context, *repository.PostgresRepository, 
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	migration, err := os.ReadFile("../../../../migrations/000002_create_users.up.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.Exec(ctx, string(migration)); err != nil {
-		t.Fatal(err)
+	for _, name := range []string{"000001_create_wallets.up.sql", "000002_create_users.up.sql", "000003_multicurrency_wallets.up.sql"} {
+		migration, err := os.ReadFile("../../../../migrations/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, string(migration)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	return ctx, repository.NewPostgresRepository(pool), pool
 }
@@ -76,11 +78,12 @@ func user(t *testing.T, id uuid.UUID, username, email string) domain.User {
 }
 
 func TestUserCreateAndRead(t *testing.T) {
-	ctx, repo, _ := setupUsers(t)
+	ctx, repo, pool := setupUsers(t)
 	want := user(t, uuid.New(), " IvAn ", "Ivan@example.com")
 	if err := repo.Create(ctx, want); err != nil {
 		t.Fatal(err)
 	}
+	assertInitialBalances(t, ctx, pool, want.ID())
 	got, err := repo.GetByUsername(ctx, "ivan")
 	if err != nil {
 		t.Fatal(err)
@@ -177,6 +180,13 @@ func TestUsersCancellationAndRollback(t *testing.T) {
 	if _, err := repo.GetByUsername(canceled, "ivan"); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled read: %v", err)
 	}
+	balancesDown, err := os.ReadFile("../../../../migrations/000003_multicurrency_wallets.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, string(balancesDown)); err != nil {
+		t.Fatal(err)
+	}
 	down, err := os.ReadFile("../../../../migrations/000002_create_users.down.sql")
 	if err != nil {
 		t.Fatal(err)
@@ -189,4 +199,67 @@ func TestUsersCancellationAndRollback(t *testing.T) {
 	if !errors.As(err, &pgErr) || pgErr.Code != "42P01" {
 		t.Fatalf("table error must not become user-not-found: %v", err)
 	}
+}
+
+func assertInitialBalances(t *testing.T, ctx context.Context, pool *pgxpool.Pool, id uuid.UUID) {
+	t.Helper()
+	rows, err := pool.Query(ctx, "SELECT currency,amount FROM balances WHERE user_id=$1", id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	got := map[string]int64{}
+	for rows.Next() {
+		var code string
+		var amount int64
+		if err := rows.Scan(&code, &amount); err != nil {
+			t.Fatal(err)
+		}
+		got[code] = amount
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("balance count = %d; want 3", len(got))
+	}
+	for _, code := range []string{"USD", "RUB", "EUR"} {
+		amount, ok := got[code]
+		if !ok || amount != 0 {
+			t.Errorf("%s balance missing or nonzero", code)
+		}
+	}
+}
+
+func TestRegistrationRollsBackWhenBalancesFail(t *testing.T) {
+	ctx, repo, pool := setupUsers(t)
+	if _, err := pool.Exec(ctx, "DELETE FROM currencies WHERE code='EUR'"); err != nil {
+		t.Fatal(err)
+	}
+	want := user(t, uuid.New(), "rollback", "rollback@example.com")
+	err := repo.Create(ctx, want)
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23503" {
+		t.Errorf("error = %v; want balance foreign-key failure", err)
+	}
+	var count int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM users WHERE id=$1", want.ID()).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatal("balance failure left a user behind")
+	}
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM balances WHERE user_id=$1", want.ID()).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatal("balance failure left partial balances")
+	}
+	if _, err := pool.Exec(ctx, "INSERT INTO currencies(code) VALUES ('EUR')"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Create(ctx, want); err != nil {
+		t.Fatalf("registration after rollback failed: %v", err)
+	}
+	assertInitialBalances(t, ctx, pool, want.ID())
 }

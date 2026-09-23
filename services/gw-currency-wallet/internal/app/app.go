@@ -90,6 +90,7 @@ func RunWithConfig(config config.Config, logger *slog.Logger) error {
 	mux.Handle("POST /api/v1/wallet", auth_http.Authenticate(tokenGenerator, http.HandlerFunc(walletHandler.ChangeWalletBalance)))
 	mux.HandleFunc("POST /api/v1/register", authHandler.Register)
 	mux.HandleFunc("POST /api/v1/login", authHandler.Login)
+	mux.Handle("GET /api/v1/balance", auth_http.Authenticate(tokenGenerator, http.HandlerFunc(walletHandler.GetBalances)))
 
 	server := &http.Server{
 		Addr:              ":" + config.HTTPPort,

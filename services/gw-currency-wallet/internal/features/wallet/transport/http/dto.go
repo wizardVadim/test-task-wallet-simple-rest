@@ -1,5 +1,7 @@
 package wallet_http
 
+import "encoding/json"
+
 type ErrorDTO struct {
 	Message ErrorMessage `json:"message"`
 }
@@ -21,6 +23,9 @@ const (
 	ErrorInsufficientFunds     ErrorMessage = "insufficient funds"
 	ErrorRequestBodyTooLarge   ErrorMessage = "request body too large"
 	ErrorChangeBalanceInternal ErrorMessage = "couldn't change wallet balance"
+	ErrorInternalServerError   ErrorMessage = "internal server error"
+	ErrorInvalidInputAmount    ErrorMessage = "invalid input amount"
+	ErrorInvalidCurrency       ErrorMessage = "invalid currency"
 )
 
 type GetBalancePayload struct {
@@ -37,3 +42,24 @@ type ChangeBalanceDTO struct {
 	OperationType string `json:"operationType"`
 	Amount        int64  `json:"amount"`
 }
+
+type ErrorResponse struct {
+	Error ErrorMessage `json:"error"`
+}
+
+type GetBalancesResponse struct {
+	Balance map[string]json.Number `json:"balance"`
+}
+
+type ApplyBalanceDTO struct {
+	Currency string      `json:"currency"`
+	Amount   json.Number `json:"amount"`
+}
+
+type ApplyBalanceResponse struct {
+	Message    string                 `json:"message"`
+	NewBalance map[string]json.Number `json:"new_balance"`
+}
+
+const MessageApplyBalanceSuccessDeposit = "Account topped up successfully"
+const MessageApplyBalanceSuccessWithdraw = "Withdrawal successful"

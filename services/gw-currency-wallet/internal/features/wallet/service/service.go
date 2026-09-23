@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"wallet-app/internal/core/domain"
+
+	"github.com/google/uuid"
 )
 
 type Service struct {
@@ -39,4 +41,23 @@ func (s *Service) GetWalletBalance(ctx context.Context, walletID domain.WalletID
 		return 0, err
 	}
 	return s.repo.GetWalletBalance(ctx, walletID)
+}
+
+func (s *Service) GetBalances(ctx context.Context, userID uuid.UUID) ([]domain.Balance, error) {
+	if err := ctx.Err(); err != nil {
+		return []domain.Balance{}, err
+	}
+	return s.repo.GetBalances(ctx, userID)
+}
+
+func (s *Service) ApplyBalanceOperation(ctx context.Context, operation domain.BalanceOperation) ([]domain.Balance, error) {
+	if err := ctx.Err(); err != nil {
+		return []domain.Balance{}, err
+	}
+
+	if err := s.repo.ApplyBalanceOperation(ctx, operation); err != nil {
+		return []domain.Balance{}, err
+	}
+
+	return s.repo.GetBalances(ctx, operation.UserID())
 }

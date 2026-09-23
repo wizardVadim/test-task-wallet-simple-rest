@@ -27,3 +27,8 @@ var (
 	ErrInvalidUserCredentials = errors.New("invalid user credentials")
 	ErrPasswordMismatch       = errors.New("password mismatch")
 )
+
+var (
+	ErrInvalidCurrencyType  = errors.New("invalid currency type")
+	ErrInvalidBalanceAmount = errors.New("invalid balance amount")
+)

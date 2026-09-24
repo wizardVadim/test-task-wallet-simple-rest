@@ -29,3 +29,10 @@ var (
 	ErrInvalidBalanceAmount = errors.New("invalid balance amount")
 	ErrBalanceNotFound      = errors.New("balance not found")
 )
+
+var (
+	ErrInvalidExchangeRateValue = errors.New("invalid exchange rate value")
+	ErrExchangeRatesNil         = errors.New("exchange rates is nil")
+	ErrInvalidBaseCurrencyRate  = errors.New("invalid base currency rate")
+	ErrBaseCurrencyNotConsists  = errors.New("base currency not consists")
+)

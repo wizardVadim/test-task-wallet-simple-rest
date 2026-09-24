@@ -22,6 +22,7 @@ type Config struct {
 	WriteTimeout      int
 	IdleTimeout       int
 	Authorization     AuthConfig
+	Exchanger         ExchangerConfig
 }
 
 type DBConfig struct {
@@ -37,6 +38,11 @@ type AuthConfig struct {
 	JwtTTL       int
 }
 
+type ExchangerConfig struct {
+	ExchangerGrpcAddr       string
+	ExchangerRequestTimeout int
+}
+
 // LoadFile reads dotenv settings; explicitly set environment variables take precedence.
 func LoadFile(path string) (Config, error) {
 	values, err := godotenv.Read(path)
@@ -48,12 +54,12 @@ func LoadFile(path string) (Config, error) {
 			return value
 		}
 		return values[key]
-	})
+	}, true)
 }
 
-func Load() (Config, error) { return load(os.Getenv) }
+func Load() (Config, error) { return load(os.Getenv, false) }
 
-func load(getenv func(string) string) (Config, error) {
+func load(getenv func(string) string, isLocalhost bool) (Config, error) {
 	required := []string{
 		"HTTP_PORT",
 		"POSTGRES_HOST",
@@ -69,6 +75,9 @@ func load(getenv func(string) string) (Config, error) {
 		"IDLE_TIMEOUT",
 		"JWT_SECRET_KEY",
 		"JWT_TTL",
+		"EXCHANGER_GRPC_DOCKER_ADDR",
+		"EXCHANGER_GRPC_LOCALHOST_ADDR",
+		"EXCHANGER_TIMEOUT",
 	}
 
 	for _, key := range required {
@@ -107,6 +116,18 @@ func load(getenv func(string) string) (Config, error) {
 		return Config{}, fmt.Errorf("JWT_TTL: cannot convert variable: %w", err)
 	}
 
+	exchangerTimeout, err := strconv.Atoi(getenv("EXCHANGER_TIMEOUT"))
+	if err != nil {
+		return Config{}, fmt.Errorf("EXCHANGER_TIMEOUT: cannot convert variable: %w", err)
+	}
+
+	var exchangerGrpcAddr string
+	if isLocalhost {
+		exchangerGrpcAddr = getenv("EXCHANGER_GRPC_LOCALHOST_ADDR")
+	} else {
+		exchangerGrpcAddr = getenv("EXCHANGER_GRPC_DOCKER_ADDR")
+	}
+
 	config := Config{
 		HTTPPort:          getenv("HTTP_PORT"),
 		MaxDbConnections:  maxDbConnections,
@@ -125,6 +146,10 @@ func load(getenv func(string) string) (Config, error) {
 		Authorization: AuthConfig{
 			JwtSecretKey: getenv("JWT_SECRET_KEY"),
 			JwtTTL:       jwtTTL,
+		},
+		Exchanger: ExchangerConfig{
+			ExchangerGrpcAddr:       exchangerGrpcAddr,
+			ExchangerRequestTimeout: exchangerTimeout,
 		},
 	}
 

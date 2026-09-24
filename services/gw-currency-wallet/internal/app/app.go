@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"contracts/exchange"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -23,7 +24,12 @@ import (
 	"wallet-app/internal/features/wallet/service"
 	wallet_http "wallet-app/internal/features/wallet/transport/http"
 
+	exchange_client "wallet-app/internal/features/exchange/client"
+	exchange_service "wallet-app/internal/features/exchange/service"
+
 	"github.com/jackc/pgx/v5/pgxpool"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 func Run() error {
@@ -74,11 +80,33 @@ func RunWithConfig(config config.Config, logger *slog.Logger) error {
 		return fmt.Errorf("%w: invalid token generator config", err)
 	}
 
+	grpcRequestTimeout := time.Second * time.Duration(config.Exchanger.ExchangerRequestTimeout)
+	svcConfig := fmt.Sprintf(`{
+		"methodConfig": [{
+			"name": [{"service": "", "method": ""}],
+			"timeout": "%.0fs"
+		}]
+	}`, grpcRequestTimeout)
+
+	exchangerConnection, err := grpc.NewClient(
+		config.Exchanger.ExchangerGrpcAddr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultServiceConfig(svcConfig),
+	)
+	if err != nil {
+		return fmt.Errorf("exchanger connection: %w", err)
+	}
+	defer exchangerConnection.Close()
+
+	exchangerClient := exchange_client.New(exchange.NewExchangeServiceClient(exchangerConnection))
+
 	walletRepository := repository.NewPostgresRepository(pool)
 	authRepository := auth_repository.NewPostgresRepository(pool)
 
 	walletService := service.New(walletRepository)
 	authService := auth_service.New(authRepository, id.GenerateUUID, hasher, tokenGenerator)
+	exchangeService := exchange_service.New(exchangerClient)
+	_ = exchangeService
 
 	walletHandler := wallet_http.New(walletService)
 	authHandler := auth_http.New(authService)

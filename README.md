@@ -5,11 +5,12 @@ Go monorepo with two services:
 - [gw-currency-wallet](services/gw-currency-wallet/README.md): wallet REST API with PostgreSQL.
 - [gw-exchanger](services/gw-exchanger/README.md): gRPC exchange rates from a separate PostgreSQL database.
 
-Wallet supports registration, login with JWT, and authenticated wallet creation,
-balance reads, deposits and withdrawals. Wallets are not yet linked to users:
-any authenticated user can access a wallet by its ID. Ownership checks and
-multicurrency balances are the next stage. Connecting wallet to exchanger, Kafka,
-notifications and analytics are still planned.
+Wallet supports registration, login with JWT, and per-user USD/RUB/EUR balances.
+Registration creates all three zero balances in the same database transaction as
+the user. Authenticated users can read, deposit into and withdraw from their own
+balances. Money is stored as integer minor units; the REST API uses decimal amounts.
+Connecting wallet to exchanger, currency exchange, Kafka, notifications and
+analytics are still planned.
 
 ## Structure
 
@@ -19,7 +20,7 @@ services/gw-exchanger/        gRPC application, migrations and tests
 contracts/                   Protobuf definitions and generated Go code
 go.work                      Local workspace for all three Go modules
 docker-compose.yaml          Both applications, two databases and migration jobs
-docker-compose.test.yaml     Temporary database for wallet integration tests
+docker-compose.test.yaml     Temporary database for repository integration tests
 Makefile                     Commands run from the repository root
 ```
 
@@ -79,7 +80,7 @@ to an empty data directory; editing credentials does not change an existing user
 | `make local-test-go` | Test both services and compile shared contracts |
 | `make test-wallet` | Run wallet tests |
 | `make test-exchanger` | Run exchanger tests |
-| `make integration-test` | Run both repository suites against temporary PostgreSQL |
+| `make integration-test` | Run wallet, auth and exchanger repository tests against temporary PostgreSQL |
 
 `docker-start` does not rebuild existing images after source changes; use
 `docker-rebuild`. For one application only, use `docker compose --env-file
@@ -130,6 +131,13 @@ using an in-memory connection. Its PostgreSQL integration tests cover seeded rat
 empty results, concurrent reads, invalid stored currencies, database constraints
 and migration rollback/reapplication. Each test uses its own schema.
 
-Wallet load-test targets remain `load-test-add-balance`, `load-test-minus-balance`
-and `load-test-get-balance`; they require Vegeta and run for 30 seconds. Add a valid `Authorization: Bearer <token>`
-header to the target files before running them; existing targets have no token.
+Wallet tests cover authentication, exact decimal amounts, per-user balances,
+registration rollback, concurrent deposits/withdrawals and overflow protection.
+
+Wallet load-test targets are `load-test-add-balance`, `load-test-minus-balance`
+and `load-test-get-balance`. They require Vegeta and run for 30 seconds.
+Pass the login token through `TOKEN`; see the [load testing instructions](services/gw-currency-wallet/README.md#load-testing).
+
+Migration `000003` deletes the old anonymous wallets. It does not create balances
+for existing users; use a newly registered user for the current API until a backfill
+migration is added. See [wallet migrations](services/gw-currency-wallet/README.md#migrations).

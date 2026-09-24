@@ -5,21 +5,18 @@ import (
 	"errors"
 	"math"
 	"os"
-	"sync"
 	"testing"
 	"time"
 
 	"wallet-app/internal/core/domain"
 	"wallet-app/internal/features/wallet/repository"
-	"wallet-app/internal/features/wallet/service"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func setupRepository(t *testing.T) (context.Context, *repository.PostgresRepository) {
+func setupWalletDatabase(t *testing.T) (context.Context, *repository.PostgresRepository, *pgxpool.Pool) {
 	t.Helper()
 
 	dsn := os.Getenv("TEST_DATABASE_URL")
@@ -71,284 +68,155 @@ func setupRepository(t *testing.T) (context.Context, *repository.PostgresReposit
 		t.Fatalf("apply migration: %v", err)
 	}
 
-	return ctx, repository.NewPostgresRepository(pool)
-}
-
-func newWalletID(t *testing.T) domain.WalletID {
-	t.Helper()
-	id, err := domain.NewWalletID(uuid.New())
-	if err != nil {
-		t.Fatal(err)
-	}
-	return id
-}
-
-func createWallet(t *testing.T, ctx context.Context, repo service.Repository) domain.WalletID {
-	t.Helper()
-	id := newWalletID(t)
-	if _, err := repo.CreateNewWallet(ctx, id); err != nil {
-		t.Fatalf("create wallet: %v", err)
-	}
-	return id
-}
-
-func withOperation(t *testing.T, id domain.WalletID, operationType domain.OperationType, amount int64) domain.WalletOperation {
-	t.Helper()
-	operation, err := domain.NewWalletOperation(id, operationType, amount)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return operation
-}
-
-func assertBalance(t *testing.T, ctx context.Context, repo service.Repository, id domain.WalletID, want int64) {
-	t.Helper()
-	got, err := repo.GetWalletBalance(ctx, id)
-	if err != nil {
-		t.Fatalf("get balance: %v", err)
-	}
-	if got != want {
-		t.Fatalf("balance = %d; want %d", got, want)
-	}
-}
-
-func TestCreateNewWallet(t *testing.T) {
-	ctx, repo := setupRepository(t)
-	id := newWalletID(t)
-	wallet, err := repo.CreateNewWallet(ctx, id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if wallet.ID() != id || wallet.Balance() != 0 {
-		t.Fatalf("unexpected wallet: %+v", wallet)
-	}
-	assertBalance(t, ctx, repo, id, 0)
-}
-
-func TestGetWalletBalance(t *testing.T) {
-	ctx, repo := setupRepository(t)
-	id := createWallet(t, ctx, repo)
-	if err := repo.ApplyOperation(ctx, withOperation(t, id, domain.OperationTypeDeposit, 1000)); err != nil {
-		t.Fatal(err)
-	}
-	assertBalance(t, ctx, repo, id, 1000)
-}
-
-func TestWalletNotFound(t *testing.T) {
-	ctx, repo := setupRepository(t)
-	id := newWalletID(t)
-	tests := []struct {
-		name string
-		run  func() error
-	}{
-		{"read", func() error { _, err := repo.GetWalletBalance(ctx, id); return err }},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if err := tt.run(); !errors.Is(err, domain.ErrWalletNotFound) {
-				t.Fatalf("error = %v; want ErrWalletNotFound", err)
-			}
-		})
-	}
-}
-
-func TestCreateDuplicateWallet(t *testing.T) {
-	ctx, repo := setupRepository(t)
-	id := createWallet(t, ctx, repo)
-	if err := repo.ApplyOperation(ctx, withOperation(t, id, domain.OperationTypeDeposit, 100)); err != nil {
-		t.Fatal(err)
-	}
-	_, err := repo.CreateNewWallet(ctx, id)
-	var pgErr *pgconn.PgError
-	if !errors.As(err, &pgErr) || pgErr.Code != "23505" {
-		t.Fatalf("error = %v; want unique violation", err)
-	}
-	assertBalance(t, ctx, repo, id, 100)
-}
-
-func TestConcurrentApplyOperations(t *testing.T) {
-	ctx, repo := setupRepository(t)
-
-	id := createWallet(t, ctx, repo)
-
-	const operations = 40
-
-	start := make(chan struct{})
-	results := make(chan error, operations)
-
-	var workers sync.WaitGroup
-
-	for i := 0; i < operations; i++ {
-		workers.Add(1)
-
-		go func() {
-			defer workers.Done()
-
-			<-start
-
-			operation, err := domain.NewWalletOperation(
-				id,
-				domain.OperationTypeDeposit,
-				1,
-			)
-			if err != nil {
-				results <- err
-				return
-			}
-
-			results <- repo.ApplyOperation(ctx, operation)
-		}()
-	}
-
-	close(start)
-
-	workers.Wait()
-	close(results)
-
-	for err := range results {
+	for _, name := range []string{"000002_create_users.up.sql", "000003_multicurrency_wallets.up.sql"} {
+		sql, err := os.ReadFile("../../../../migrations/" + name)
 		if err != nil {
-			t.Errorf("concurrent operation: %v", err)
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, string(sql)); err != nil {
+			t.Fatal(err)
 		}
 	}
 
-	assertBalance(t, ctx, repo, id, operations)
+	return ctx, repository.NewPostgresRepository(pool), pool
 }
 
-func TestApplyOperationCancelledContext(t *testing.T) {
-	ctx, repo := setupRepository(t)
-
-	id := createWallet(t, ctx, repo)
-
-	operation, err := domain.NewWalletOperation(
-		id,
-		domain.OperationTypeDeposit,
-		100,
-	)
+func balanceOperation(t *testing.T, id uuid.UUID, code domain.CurrencyType, kind domain.OperationType, amount int64) domain.BalanceOperation {
+	t.Helper()
+	currency, err := domain.NewCurrency(code)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	cancelledCtx, cancel := context.WithCancel(ctx)
-	cancel()
-
-	err = repo.ApplyOperation(cancelledCtx, operation)
-
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("error = %v; want context.Canceled", err)
+	op, err := domain.NewBalanceOperation(id, currency, kind, amount)
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	assertBalance(t, ctx, repo, id, 0)
+	return op
 }
 
-func TestApplyOperation(t *testing.T) {
-	ctx, repo := setupRepository(t)
-
-	tests := []struct {
-		name          string
-		initial       int64
-		operationType domain.OperationType
-		amount        int64
-		wantBalance   int64
-		wantErr       error
-		missingWallet bool
-	}{
-		{
-			name:          "deposit",
-			initial:       100,
-			operationType: domain.OperationTypeDeposit,
-			amount:        50,
-			wantBalance:   150,
-		},
-		{
-			name:          "withdraw",
-			initial:       100,
-			operationType: domain.OperationTypeWithdraw,
-			amount:        40,
-			wantBalance:   60,
-		},
-		{
-			name:          "withdraw to zero",
-			initial:       100,
-			operationType: domain.OperationTypeWithdraw,
-			amount:        100,
-			wantBalance:   0,
-		},
-		{
-			name:          "deposit to max int64",
-			initial:       math.MaxInt64 - 1,
-			operationType: domain.OperationTypeDeposit,
-			amount:        1,
-			wantBalance:   math.MaxInt64,
-		},
-		{
-			name:          "balance overflow",
-			initial:       math.MaxInt64,
-			operationType: domain.OperationTypeDeposit,
-			amount:        1,
-			wantBalance:   math.MaxInt64,
-			wantErr:       domain.ErrBalanceOverflow,
-		},
-		{
-			name:          "insufficient funds",
-			initial:       100,
-			operationType: domain.OperationTypeWithdraw,
-			amount:        101,
-			wantBalance:   100,
-			wantErr:       domain.ErrSmallBalance,
-		},
-		{
-			name:          "wallet not found",
-			operationType: domain.OperationTypeDeposit,
-			amount:        100,
-			wantErr:       domain.ErrWalletNotFound,
-			missingWallet: true,
-		},
+func seedBalances(t *testing.T, ctx context.Context, pool *pgxpool.Pool) uuid.UUID {
+	t.Helper()
+	id := uuid.New()
+	if _, err := pool.Exec(ctx, "INSERT INTO users(id,username,email,password_hash) VALUES ($1,$2,$3,'test-hash')", id, id.String(), id.String()+"@example.com"); err != nil {
+		t.Fatal(err)
 	}
+	if _, err := pool.Exec(ctx, "INSERT INTO balances(user_id,currency) SELECT $1,code FROM currencies", id); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
 
-	for _, tt := range tests {
+func TestApplyBalanceOperationPostgres(t *testing.T) {
+	ctx, repo, pool := setupWalletDatabase(t)
+	for _, tt := range []struct {
+		name                  string
+		initial, amount, want int64
+		kind                  domain.OperationType
+		wantErr               error
+	}{
+		{"deposit", 0, 12345, 12345, domain.OperationTypeDeposit, nil},
+		{"withdraw", 12345, 45, 12300, domain.OperationTypeWithdraw, nil},
+		{"withdraw all", 12345, 12345, 0, domain.OperationTypeWithdraw, nil},
+		{"insufficient", 0, 1, 0, domain.OperationTypeWithdraw, domain.ErrSmallBalance},
+		{"reach maximum", math.MaxInt64 - 1, 1, math.MaxInt64, domain.OperationTypeDeposit, nil},
+		{"overflow", math.MaxInt64, 1, math.MaxInt64, domain.OperationTypeDeposit, domain.ErrBalanceOverflow},
+	} {
 		t.Run(tt.name, func(t *testing.T) {
-			var id domain.WalletID
-
-			if tt.missingWallet {
-				id = newWalletID(t)
-			} else {
-				id = createWallet(t, ctx, repo)
-
-				if tt.initial != 0 {
-					if err := repo.ApplyOperation(
-						ctx,
-						withOperation(t, id, domain.OperationTypeDeposit, tt.initial),
-					); err != nil {
-						t.Fatal(err)
+			id := seedBalances(t, ctx, pool)
+			other := seedBalances(t, ctx, pool)
+			if _, err := pool.Exec(ctx, "UPDATE balances SET amount=$1 WHERE user_id=$2 AND currency='USD'", tt.initial, id); err != nil {
+				t.Fatal(err)
+			}
+			err := repo.ApplyBalanceOperation(ctx, balanceOperation(t, id, domain.CurrencyTypeUSD, tt.kind, tt.amount))
+			if !errors.Is(err, tt.wantErr) {
+				t.Errorf("error=%v; want %v", err, tt.wantErr)
+			}
+			for _, owner := range []uuid.UUID{id, other} {
+				balances, err := repo.GetBalances(ctx, owner)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(balances) != 3 {
+					t.Fatalf("got %d balances", len(balances))
+				}
+				for _, b := range balances {
+					want := int64(0)
+					if owner == id && b.Currency().CurrencyType() == domain.CurrencyTypeUSD {
+						want = tt.want
+					}
+					if b.UserID() != owner || b.Amount() != want {
+						t.Errorf("incorrect balance: owner=%v currency=%v amount=%d want=%d", b.UserID(), b.Currency(), b.Amount(), want)
 					}
 				}
 			}
+		})
+	}
+	for _, kind := range []domain.OperationType{domain.OperationTypeDeposit, domain.OperationTypeWithdraw} {
+		if err := repo.ApplyBalanceOperation(ctx, balanceOperation(t, uuid.New(), domain.CurrencyTypeUSD, kind, 1)); !errors.Is(err, domain.ErrBalanceNotFound) {
+			t.Errorf("missing user error=%v", err)
+		}
+	}
+	id := seedBalances(t, ctx, pool)
+	if _, err := pool.Exec(ctx, "DELETE FROM balances WHERE user_id=$1 AND currency='EUR'", id); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.ApplyBalanceOperation(ctx, balanceOperation(t, id, domain.CurrencyTypeEUR, domain.OperationTypeDeposit, 1)); !errors.Is(err, domain.ErrBalanceNotFound) {
+		t.Errorf("missing currency balance error=%v", err)
+	}
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := repo.ApplyBalanceOperation(canceled, balanceOperation(t, id, domain.CurrencyTypeUSD, domain.OperationTypeDeposit, 1)); !errors.Is(err, context.Canceled) {
+		t.Errorf("canceled error=%v", err)
+	}
+	if err := repo.ApplyBalanceOperation(ctx, domain.BalanceOperation{}); !errors.Is(err, domain.ErrInvalidOperationType) {
+		t.Errorf("zero operation error=%v", err)
+	}
+}
 
-			operation := withOperation(
-				t,
-				id,
-				tt.operationType,
-				tt.amount,
-			)
-
-			err := repo.ApplyOperation(ctx, operation)
-
-			if !errors.Is(err, tt.wantErr) {
-				t.Fatalf(
-					"error = %v; want %v",
-					err,
-					tt.wantErr,
-				)
+func TestConcurrentBalanceOperations(t *testing.T) {
+	ctx, repo, pool := setupWalletDatabase(t)
+	const n = 32
+	for _, tt := range []struct {
+		name          string
+		initial, want int64
+		kind          domain.OperationType
+		successes     int
+		failure       error
+	}{
+		{"deposits", 0, n, domain.OperationTypeDeposit, n, nil},
+		{"withdrawals cannot overdraw", 10, 0, domain.OperationTypeWithdraw, 10, domain.ErrSmallBalance},
+		{"deposits cannot overflow", math.MaxInt64 - 10, math.MaxInt64, domain.OperationTypeDeposit, 10, domain.ErrBalanceOverflow},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			id := seedBalances(t, ctx, pool)
+			if _, err := pool.Exec(ctx, "UPDATE balances SET amount=$1 WHERE user_id=$2 AND currency='USD'", tt.initial, id); err != nil {
+				t.Fatal(err)
 			}
-
-			if !tt.missingWallet {
-				assertBalance(
-					t,
-					ctx,
-					repo,
-					id,
-					tt.wantBalance,
-				)
+			op := balanceOperation(t, id, domain.CurrencyTypeUSD, tt.kind, 1)
+			start := make(chan struct{})
+			results := make(chan error, n)
+			for i := 0; i < n; i++ {
+				go func() { <-start; results <- repo.ApplyBalanceOperation(ctx, op) }()
+			}
+			close(start)
+			successes := 0
+			for i := 0; i < n; i++ {
+				err := <-results
+				if err == nil {
+					successes++
+				} else if !errors.Is(err, tt.failure) {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+			if successes != tt.successes {
+				t.Errorf("successes=%d; want %d", successes, tt.successes)
+			}
+			var amount int64
+			if err := pool.QueryRow(ctx, "SELECT amount FROM balances WHERE user_id=$1 AND currency='USD'", id).Scan(&amount); err != nil {
+				t.Fatal(err)
+			}
+			if amount != tt.want {
+				t.Errorf("amount=%d; want %d", amount, tt.want)
 			}
 		})
 	}

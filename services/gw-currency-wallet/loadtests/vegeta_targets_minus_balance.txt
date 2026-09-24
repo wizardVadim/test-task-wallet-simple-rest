@@ -1,3 +1,3 @@
-POST http://localhost:8080/api/v1/wallet
+POST http://localhost:8080/api/v1/wallet/withdraw
 Content-Type: application/json
 @./loadtests/vegeta-minus-balance-body.json

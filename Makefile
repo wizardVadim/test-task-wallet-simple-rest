@@ -58,10 +58,13 @@ integration-test:
 		go test -count=1 -v ./$(WALLET_DIR)/internal/features/wallet/repository ./$(WALLET_DIR)/internal/features/auth/repository ./$(EXCHANGER_DIR)/internal/features/rates/repository
 
 load-test-add-balance:
-	cd $(WALLET_DIR) && vegeta attack -targets=./loadtests/vegeta_targets_add_balance.txt -rate=1000 -duration=30s | vegeta report
+	@test -n "$$TOKEN" || { echo "Set TOKEN to a JWT returned by login" >&2; exit 1; }
+	@cd $(WALLET_DIR) && vegeta attack -header="Authorization: Bearer $$TOKEN" -targets=./loadtests/vegeta_targets_add_balance.txt -rate=1000 -duration=30s | vegeta report
 
 load-test-get-balance:
-	cd $(WALLET_DIR) && vegeta attack -targets=./loadtests/vegeta_targets_get_balance.txt -rate=1000 -duration=30s | vegeta report
+	@test -n "$$TOKEN" || { echo "Set TOKEN to a JWT returned by login" >&2; exit 1; }
+	@cd $(WALLET_DIR) && vegeta attack -header="Authorization: Bearer $$TOKEN" -targets=./loadtests/vegeta_targets_get_balance.txt -rate=1000 -duration=30s | vegeta report
 
 load-test-minus-balance:
-	cd $(WALLET_DIR) && vegeta attack -targets=./loadtests/vegeta_targets_minus_balance.txt -rate=1000 -duration=30s | vegeta report
+	@test -n "$$TOKEN" || { echo "Set TOKEN to a JWT returned by login" >&2; exit 1; }
+	@cd $(WALLET_DIR) && vegeta attack -header="Authorization: Bearer $$TOKEN" -targets=./loadtests/vegeta_targets_minus_balance.txt -rate=1000 -duration=30s | vegeta report

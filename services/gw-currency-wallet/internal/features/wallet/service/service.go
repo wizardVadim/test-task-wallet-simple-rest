@@ -8,39 +8,13 @@ import (
 )
 
 type Service struct {
-	repo              Repository
-	walletIDGenerator WalletIDGenerator
+	repo Repository
 }
 
-func New(repository Repository, walletIDGenerator WalletIDGenerator) *Service {
+func New(repository Repository) *Service {
 	return &Service{
-		repo:              repository,
-		walletIDGenerator: walletIDGenerator,
+		repo: repository,
 	}
-}
-
-func (s *Service) CreateNewWallet(ctx context.Context) (domain.Wallet, error) {
-	id := s.walletIDGenerator()
-	walletID, err := domain.NewWalletID(id)
-	if err != nil {
-		return domain.Wallet{}, err
-	}
-	return s.repo.CreateNewWallet(ctx, walletID)
-}
-
-func (s *Service) ChangeWalletBalance(ctx context.Context, operation domain.WalletOperation) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-
-	return s.repo.ApplyOperation(ctx, operation)
-}
-
-func (s *Service) GetWalletBalance(ctx context.Context, walletID domain.WalletID) (int64, error) {
-	if err := ctx.Err(); err != nil {
-		return 0, err
-	}
-	return s.repo.GetWalletBalance(ctx, walletID)
 }
 
 func (s *Service) GetBalances(ctx context.Context, userID uuid.UUID) ([]domain.Balance, error) {

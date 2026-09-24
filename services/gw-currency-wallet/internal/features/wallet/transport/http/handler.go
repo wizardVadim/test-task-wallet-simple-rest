@@ -12,8 +12,6 @@ import (
 
 	"wallet-app/internal/core/domain"
 	auth_http "wallet-app/internal/features/auth/transport/http"
-
-	"github.com/google/uuid"
 )
 
 type Handler struct {
@@ -22,226 +20,6 @@ type Handler struct {
 
 func New(walletService WalletService) *Handler {
 	return &Handler{walletService: walletService}
-}
-
-// GET /api/v1/wallets{wallet_uuid}
-func (h *Handler) GetWalletBalance(w http.ResponseWriter, r *http.Request) {
-	if r.Context().Err() != nil {
-		return
-	}
-
-	parsedID, err := uuid.Parse(r.PathValue("wallet_uuid"))
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, ResponseDTO{
-			Error: &ErrorDTO{Message: ErrorInvalidWalletID},
-		})
-		return
-	}
-
-	walletID, err := domain.NewWalletID(parsedID)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, ResponseDTO{
-			Error: &ErrorDTO{Message: ErrorInvalidWalletID},
-		})
-		return
-	}
-
-	balance, err := h.walletService.GetWalletBalance(r.Context(), walletID)
-	if err != nil {
-		if r.Context().Err() != nil {
-			return
-		}
-		if errors.Is(err, domain.ErrWalletNotFound) {
-			writeJSON(w, http.StatusNotFound, ResponseDTO{
-				Error: &ErrorDTO{Message: ErrorWalletNotFound},
-			})
-			return
-		}
-
-		slog.ErrorContext(r.Context(), "get wallet balance failed", "error", err)
-		writeJSON(w, http.StatusInternalServerError, ResponseDTO{
-			Error: &ErrorDTO{Message: ErrorGetBalanceInternal},
-		})
-		return
-	}
-
-	writeJSON(w, http.StatusOK, ResponseDTO{
-		Payload: GetBalancePayload{Balance: balance},
-	})
-}
-
-// POST /api/v1/wallets
-func (h *Handler) CreateWallet(w http.ResponseWriter, r *http.Request) {
-	if r.Context().Err() != nil {
-		return
-	}
-
-	wallet, err := h.walletService.CreateNewWallet(r.Context())
-	if err != nil {
-		if r.Context().Err() != nil {
-			return
-		}
-
-		slog.ErrorContext(r.Context(), "create wallet failed", "error", err)
-		writeJSON(w, http.StatusInternalServerError, ResponseDTO{
-			Error: &ErrorDTO{Message: ErrorCreateWalletInternal},
-		})
-		return
-	}
-
-	walletID := wallet.ID().Value().String()
-	w.Header().Set("Location", "/api/v1/wallets/"+walletID)
-	writeJSON(w, http.StatusCreated, ResponseDTO{
-		Payload: CreateWalletPayload{
-			WalletID: walletID,
-			Balance:  wallet.Balance(),
-		},
-	})
-}
-
-// POST /api/v1/wallet
-//
-// request body:
-//
-//	{
-//		"walletID": "9c2d217e-96d3-4117-9f0b-3952c4dc6ec2",
-//		"operationType": "DEPOSIT",
-//		"amount": 1000
-//	}
-func (h *Handler) ChangeWalletBalance(w http.ResponseWriter, r *http.Request) {
-	if r.Context().Err() != nil {
-		return
-	}
-
-	var changeBalanceDTO ChangeBalanceDTO
-
-	r.Body = http.MaxBytesReader(w, r.Body, 4096)
-	decoder := json.NewDecoder(r.Body)
-
-	err := decoder.Decode(&changeBalanceDTO)
-	if err == nil {
-		var extra any
-		if nextErr := decoder.Decode(&extra); nextErr != io.EOF {
-			if nextErr == nil {
-				err = errors.New("multiple JSON values")
-			} else {
-				err = nextErr
-			}
-		}
-	}
-
-	if err != nil {
-		if r.Context().Err() != nil {
-			return
-		}
-
-		status := http.StatusBadRequest
-		message := ErrorInvalidRequestBody
-
-		var sizeErr *http.MaxBytesError
-		if errors.As(err, &sizeErr) {
-			status = http.StatusRequestEntityTooLarge
-			message = ErrorRequestBodyTooLarge
-		}
-
-		writeJSON(w, status, ResponseDTO{
-			Error: &ErrorDTO{Message: message},
-		})
-		return
-	}
-
-	parsedID, err := uuid.Parse(changeBalanceDTO.WalletID)
-	if err != nil {
-		if r.Context().Err() != nil {
-			return
-		}
-
-		slog.WarnContext(r.Context(), "change wallet balance failed", "error", err)
-		writeJSON(w, http.StatusBadRequest, ResponseDTO{
-			Error: &ErrorDTO{Message: ErrorInvalidRequestBody},
-		})
-		return
-	}
-
-	walletID, err := domain.NewWalletID(parsedID)
-	if err != nil {
-		if r.Context().Err() != nil {
-			return
-		}
-
-		slog.WarnContext(r.Context(), "change wallet balance failed", "error", err)
-		writeJSON(w, http.StatusBadRequest, ResponseDTO{
-			Error: &ErrorDTO{Message: ErrorInvalidWalletID},
-		})
-		return
-	}
-
-	operation, err := domain.NewWalletOperation(
-		walletID,
-		domain.OperationType(changeBalanceDTO.OperationType),
-		changeBalanceDTO.Amount,
-	)
-	if err != nil {
-		if r.Context().Err() != nil {
-			return
-		}
-
-		slog.WarnContext(r.Context(), "change wallet balance failed", "error", err)
-		writeJSON(w, http.StatusBadRequest, ResponseDTO{
-			Error: &ErrorDTO{Message: ErrorInvalidRequestBody},
-		})
-		return
-	}
-
-	if err := h.walletService.ChangeWalletBalance(r.Context(), operation); err != nil {
-		if r.Context().Err() != nil {
-			return
-		}
-
-		var response ResponseDTO
-		var statusCode int
-
-		if errors.Is(err, domain.ErrSmallBalance) {
-			response = ResponseDTO{
-				Error: &ErrorDTO{
-					Message: ErrorInsufficientFunds,
-				},
-			}
-			statusCode = http.StatusConflict
-		} else if errors.Is(err, domain.ErrBalanceOverflow) {
-			response = ResponseDTO{
-				Error: &ErrorDTO{
-					Message: ErrorBalanceOverflow,
-				},
-			}
-			statusCode = http.StatusUnprocessableEntity
-		} else if errors.Is(err, domain.ErrWalletNotFound) {
-			response = ResponseDTO{
-				Error: &ErrorDTO{
-					Message: ErrorWalletNotFound,
-				},
-			}
-			statusCode = http.StatusNotFound
-		} else {
-			response = ResponseDTO{
-				Error: &ErrorDTO{
-					Message: ErrorChangeBalanceInternal,
-				},
-			}
-			statusCode = http.StatusInternalServerError
-		}
-
-		level := slog.LevelWarn
-		if statusCode >= 500 {
-			level = slog.LevelError
-		}
-		slog.Log(r.Context(), level, "change wallet balance failed", "error", err)
-		writeJSON(w, statusCode, response)
-		return
-	}
-
-	slog.InfoContext(r.Context(), "wallet balance changed", "wallet_id", walletID.Value().String(), "operation", operation.OperationType(), "amount", operation.Amount())
-	w.WriteHeader(http.StatusOK)
 }
 
 func writeJSON(w http.ResponseWriter, status int, response any) {
@@ -356,6 +134,11 @@ func (h *Handler) applyBalanceOperation(w http.ResponseWriter, r *http.Request, 
 			return
 		}
 		slog.WarnContext(r.Context(), "change balance failed", "error", err, "operation", operationType)
+		var maxBytes *http.MaxBytesError
+		if errors.As(err, &maxBytes) {
+			writeJSON(w, http.StatusRequestEntityTooLarge, ErrorResponse{Error: ErrorRequestBodyTooLarge})
+			return
+		}
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: ErrorInvalidRequestBody})
 		return
 	}
@@ -366,7 +149,13 @@ func (h *Handler) applyBalanceOperation(w http.ResponseWriter, r *http.Request, 
 			return
 		}
 		slog.WarnContext(r.Context(), "change balance failed", "error", err, "operation", operationType)
-		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: ErrorInvalidInputAmount})
+		var errorMessage ErrorMessage
+		if operationType == domain.OperationTypeDeposit {
+			errorMessage = ErrorInvalidAmountOrCurrency
+		} else {
+			errorMessage = ErrorInsufficientFundsOrInvalidAmount
+		}
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: errorMessage})
 		return
 	}
 
@@ -375,8 +164,14 @@ func (h *Handler) applyBalanceOperation(w http.ResponseWriter, r *http.Request, 
 		if r.Context().Err() != nil {
 			return
 		}
+		var errorMessage ErrorMessage
+		if operationType == domain.OperationTypeDeposit {
+			errorMessage = ErrorInvalidAmountOrCurrency
+		} else {
+			errorMessage = ErrorInvalidCurrency
+		}
 		slog.WarnContext(r.Context(), "change balance failed", "error", err, "operation", operationType)
-		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: ErrorInvalidCurrency})
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: errorMessage})
 		return
 	}
 
@@ -392,7 +187,13 @@ func (h *Handler) applyBalanceOperation(w http.ResponseWriter, r *http.Request, 
 		}
 		if errors.Is(err, domain.ErrInvalidBalanceAmount) {
 			slog.WarnContext(r.Context(), "change balance failed", "error", err, "operation", operationType)
-			writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: ErrorInvalidInputAmount})
+			var errorMessage ErrorMessage
+			if operationType == domain.OperationTypeDeposit {
+				errorMessage = ErrorInvalidAmountOrCurrency
+			} else {
+				errorMessage = ErrorInsufficientFundsOrInvalidAmount
+			}
+			writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: errorMessage})
 			return
 		}
 		slog.ErrorContext(r.Context(), "change balance failed", "error", err, "operation", operationType)
@@ -410,8 +211,8 @@ func (h *Handler) applyBalanceOperation(w http.ResponseWriter, r *http.Request, 
 		var statusCode int
 
 		if errors.Is(err, domain.ErrSmallBalance) {
-			response.Error = ErrorInsufficientFunds
-			statusCode = http.StatusConflict
+			response.Error = ErrorInsufficientFundsOrInvalidAmount
+			statusCode = http.StatusBadRequest
 		} else if errors.Is(err, domain.ErrBalanceOverflow) {
 			response.Error = ErrorBalanceOverflow
 			statusCode = http.StatusUnprocessableEntity

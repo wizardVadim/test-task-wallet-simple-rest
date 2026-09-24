@@ -77,7 +77,7 @@ func RunWithConfig(config config.Config, logger *slog.Logger) error {
 	walletRepository := repository.NewPostgresRepository(pool)
 	authRepository := auth_repository.NewPostgresRepository(pool)
 
-	walletService := service.New(walletRepository, id.GenerateUUID)
+	walletService := service.New(walletRepository)
 	authService := auth_service.New(authRepository, id.GenerateUUID, hasher, tokenGenerator)
 
 	walletHandler := wallet_http.New(walletService)
@@ -85,12 +85,11 @@ func RunWithConfig(config config.Config, logger *slog.Logger) error {
 
 	mux := http.NewServeMux()
 
-	mux.Handle("POST /api/v1/wallets", auth_http.Authenticate(tokenGenerator, http.HandlerFunc(walletHandler.CreateWallet)))
-	mux.Handle("GET /api/v1/wallets/{wallet_uuid}", auth_http.Authenticate(tokenGenerator, http.HandlerFunc(walletHandler.GetWalletBalance)))
-	mux.Handle("POST /api/v1/wallet", auth_http.Authenticate(tokenGenerator, http.HandlerFunc(walletHandler.ChangeWalletBalance)))
 	mux.HandleFunc("POST /api/v1/register", authHandler.Register)
 	mux.HandleFunc("POST /api/v1/login", authHandler.Login)
 	mux.Handle("GET /api/v1/balance", auth_http.Authenticate(tokenGenerator, http.HandlerFunc(walletHandler.GetBalances)))
+	mux.Handle("POST /api/v1/wallet/deposit", auth_http.Authenticate(tokenGenerator, http.HandlerFunc(walletHandler.BalanceDeposit)))
+	mux.Handle("POST /api/v1/wallet/withdraw", auth_http.Authenticate(tokenGenerator, http.HandlerFunc(walletHandler.BalanceWithdraw)))
 
 	server := &http.Server{
 		Addr:              ":" + config.HTTPPort,

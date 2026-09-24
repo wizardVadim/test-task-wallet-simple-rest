@@ -12,6 +12,7 @@ See the [repository README](../../README.md) for the workspace layout.
 Requires Docker and Docker Compose. Run commands from the repository root:
 
 ```bash
+# On first setup only; keep an existing config.env.
 cp example_config.env config.env
 # Set your own JWT_SECRET_KEY in config.env before starting.
 docker compose --env-file config.env up --build -d
@@ -106,7 +107,7 @@ An image rebuild is not needed for environment-only changes once the image inclu
 support for these settings. A plain container restart does not reload `config.env`.
 Run identical load scenarios for each pool size and compare throughput, latency,
 errors, and final balances. Increasing the pool size does not guarantee higher throughput
-when all updates target the same wallet. `WRITE_TIMEOUT` controls response writes;
+when all updates target the same user and currency. `WRITE_TIMEOUT` controls response writes;
 it does not set a database query timeout.
 
 ## Authentication
@@ -115,9 +116,9 @@ it does not set a database query timeout.
 routes below require `Authorization: Bearer <token>`. Missing, invalid or expired
 tokens receive `401 Unauthorized` with an empty body.
 
-Wallets currently have no owner relationship. A valid token permits access to any
-wallet ID; restricting users to their own balances is planned with multicurrency wallets.
-Registration creates a user only; it does not create a wallet.
+The user ID comes from the verified JWT. Requests operate only on that user's
+balances; no wallet ID or user ID is needed in the request body. Registration
+creates the user and zero USD, RUB and EUR balances in one transaction.
 
 ### Register
 
@@ -152,7 +153,7 @@ Invalid credentials or invalid password: `401`,
 `{"error":"Invalid username or password"}`. Unexpected internal errors return
 `500`, `{"error":"internal server error"}`. Both auth endpoints accept one JSON
 value with a 4096-byte limit: malformed input returns `400`, oversized input `413`.
-Auth errors use `{"error":"..."}`, unlike the wallet error envelope below.
+Auth and wallet handler errors use `{"error":"..."}`.
 
 JWTs use HS256 with `sub` (user ID), `iat` (issued at), and `exp` (expiry).
 There is no refresh-token or individual-token revocation endpoint; log in again
@@ -161,115 +162,115 @@ then passes a nonzero UUID user ID through the request context.
 
 ## API
 
-Amounts and balances are integers in minor monetary units: `100` represents
-1.00 monetary units. The API has no currency field and performs no conversion.
-Operation amounts must be positive and fit in `int64`. Balances range from
-zero to `9223372036854775807`; overdrafts are not supported.
+| Method | Route | Purpose |
+|---|---|---|
+| POST | `/api/v1/register` | Create a user and three zero balances |
+| POST | `/api/v1/login` | Receive a JWT |
+| GET | `/api/v1/balance` | Read the authenticated user's balances |
+| POST | `/api/v1/wallet/deposit` | Deposit into one currency balance |
+| POST | `/api/v1/wallet/withdraw` | Withdraw from one currency balance |
 
-### Create a wallet
+The last three routes require `Authorization: Bearer <token>`.
+The old `/api/v1/wallets`, `/api/v1/wallets/{wallet_uuid}` and
+`/api/v1/wallet` routes have been removed. There is no separate create-wallet endpoint.
 
-`POST /api/v1/wallets` creates a wallet with a server-generated UUID and zero balance.
-No request body is required.
+### Money and currencies
+
+API amounts use major currency units: `1` means 1.00 USD/EUR/RUB, and `0.01`
+is the smallest supported amount. PostgreSQL stores integer minor units in `BIGINT`
+(`1.23` becomes `123`); conversion does not use floating-point arithmetic.
+Responses contain JSON numbers with two decimal places.
+
+Currencies are exactly `USD`, `EUR` and `RUB` (uppercase). Operation amounts must
+be positive, have at most two fractional digits, and fit into `int64` minor units.
+Scientific notation such as `1e2` is rejected. The maximum amount or balance is
+`92233720368547758.07` major units. Balances cannot be negative.
+No currency conversion is performed by deposit or withdraw.
+
+### Read balances
 
 ```bash
-curl -i -X POST http://localhost:8080/api/v1/wallets \
+curl -i http://localhost:8080/api/v1/balance \
   -H "Authorization: Bearer $TOKEN"
 ```
 
-Returns `201 Created` and a `Location` header pointing to the wallet's GET endpoint:
+A newly registered user receives `200 OK`:
 
 ```json
-{
-  "payload": {
-    "walletId": "63e8c3d9-e907-4739-b2d0-6c751a887b4a",
-    "balance": 0
-  }
-}
+{"balance":{"USD":0.00,"EUR":0.00,"RUB":0.00}}
 ```
 
-Use the returned UUID in subsequent requests:
+Currency key order is not significant.
+
+### Deposit
+
+Both operation endpoints accept one JSON object, with a 4096-byte body limit.
 
 ```bash
-WALLET_ID='63e8c3d9-e907-4739-b2d0-6c751a887b4a'
-```
-
-### Read the balance
-
-`GET /api/v1/wallets/{wallet_uuid}` returns `200 OK`:
-
-```bash
-curl -i "http://localhost:8080/api/v1/wallets/$WALLET_ID" \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-```json
-{
-  "payload": {
-    "balance": 1000
-  }
-}
-```
-
-### Deposit or withdraw
-
-`POST /api/v1/wallet` accepts one JSON object, up to 4096 bytes:
-
-```json
-{
-  "walletId": "63e8c3d9-e907-4739-b2d0-6c751a887b4a",
-  "operationType": "DEPOSIT",
-  "amount": 1000
-}
-```
-
-Deposit:
-
-```bash
-curl -i -X POST http://localhost:8080/api/v1/wallet \
+curl -i -X POST http://localhost:8080/api/v1/wallet/deposit \
   -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
-  -d "{\"walletId\":\"$WALLET_ID\",\"operationType\":\"DEPOSIT\",\"amount\":1000}"
+  -d '{"currency":"USD","amount":100.00}'
 ```
 
-Withdraw:
+For the new user above, success is `200 OK`:
+
+```json
+{"message":"Account topped up successfully","new_balance":{"USD":100.00,"EUR":0.00,"RUB":0.00}}
+```
+
+### Withdraw
 
 ```bash
-curl -i -X POST http://localhost:8080/api/v1/wallet \
+curl -i -X POST http://localhost:8080/api/v1/wallet/withdraw \
   -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
-  -d "{\"walletId\":\"$WALLET_ID\",\"operationType\":\"WITHDRAW\",\"amount\":1000}"
+  -d '{"currency":"USD","amount":25.50}'
 ```
 
-Both operations return `200 OK` with an empty body after a successful update.
-Operation types are case-insensitive. Withdrawing the entire balance is allowed.
-Each accepted POST is a separate operation; automatic retries can apply it again.
+After the deposit above, success is `200 OK`:
+
+```json
+{"message":"Withdrawal successful","new_balance":{"USD":74.50,"EUR":0.00,"RUB":0.00}}
+```
+
+Withdrawing the entire balance is allowed. Each accepted POST is a separate
+operation; there is no idempotency key, so retries can apply it again.
+The SQL update is atomic. Reading `new_balance` is a separate query: its result
+can include concurrent operations, and a read failure can return 500 after the
+update has succeeded.
 
 ## Error responses
 
-Wallet handler errors use this JSON envelope (authentication failures are described above):
+Wallet handler errors use `{"error":"..."}`:
 
-```json
-{
-  "payload": null,
-  "error": {
-    "message": "wallet not found"
-  }
-}
-```
-
-| HTTP status | Message | Description |
+| HTTP status | Message | When |
 |---|---|---|
-| `400 Bad Request` | `invalid wallet id` | Invalid or nil wallet UUID |
-| `400 Bad Request` | `invalid request body` | Malformed JSON, invalid fields, operation, or amount |
-| `413 Request Entity Too Large` | `request body too large` | Request body exceeds 4096 bytes |
-| `404 Not Found` | `wallet not found` | Wallet does not exist |
-| `409 Conflict` | `insufficient funds` | Withdrawal exceeds the balance |
-| `422 Unprocessable Entity` | `balance overflow` | Deposit exceeds the maximum balance |
-| `500 Internal Server Error` | `couldn't get wallet balance` | Unexpected balance read failure |
-| `500 Internal Server Error` | `couldn't create a new wallet` | Unexpected wallet creation failure |
-| `500 Internal Server Error` | `couldn't change wallet balance` | Unexpected operation failure |
+| 400 | `invalid request body` | Malformed JSON or multiple JSON values |
+| 400 | `Invalid amount or currency` | Invalid deposit amount or currency |
+| 400 | `Insufficient funds or invalid amount` | Invalid withdrawal amount or insufficient funds |
+| 400 | `invalid currency` | Unsupported withdrawal currency |
+| 413 | `request body too large` | Request body exceeds 4096 bytes |
+| 422 | `balance overflow` | Deposit would exceed the maximum balance |
+| 500 | `internal server error` | Unexpected failure, including a missing balance row during an operation |
 
+Missing, invalid or expired JWTs receive 401 with an empty body from middleware.
 Unknown routes and unsupported HTTP methods use standard `net/http` responses.
+
+## Migrations
+
+Migrations run in order: `000001` creates the legacy wallets table, `000002`
+creates users, and `000003` replaces wallets with currencies and per-user balances.
+The balance primary key is `(user_id, currency)`; amounts must be nonnegative.
+
+Migration `000003` deliberately deletes all old anonymous wallets and their money.
+Rolling it back recreates an empty legacy table; it does not restore deleted data.
+Keep the earlier migration files: a fresh database still applies the full sequence.
+
+Existing users are not backfilled by `000003`. Until a backfill migration is added,
+use a newly registered user for the balance API. An existing user with no balance
+rows receives `{"balance":{}}` on GET; deposit/withdraw currently return 500.
+New registrations create all three balances atomically and roll back if this fails.
 
 ## Local run
 
@@ -323,67 +324,46 @@ Requires Go, Make, Docker Compose with `up --wait` support, and a running local
 Docker daemon. The target covers wallet, auth and exchanger repositories. The command uses `docker-compose.test.yaml`, selects an available
 local port, waits for database readiness, and runs the repository tests.
 Containers, network, and volumes are removed after success, failure, or interruption.
-Each test applies the project migration in a separate schema and cleans it up afterward.
+Each PostgreSQL test applies its migrations in a separate schema and cleans it up afterward.
 These tests do not use `config.env` or the development database.
 
 Coverage includes registration/login, bcrypt, JWT validation, authentication middleware,
-JWT configuration precedence and bounds, domain validation, service error propagation,
-HTTP responses, atomic balance updates, balance limits, and concurrent deposits.
+configuration, domain validation, exact decimal conversion and HTTP error responses.
+Repository tests cover registration rollback, user/currency isolation, balance limits,
+concurrent deposits and withdrawals, and prevention of overdrafts and overflow.
 
 ## Load testing
 
-The results below predate JWT authentication and do not measure the current authenticated API.
+Requires Vegeta and a running API. Register a dedicated test user, log in, and set
+`TOKEN` to the returned JWT as shown above. The committed target files contain no
+credentials; pass authentication through Vegeta's header option.
 
-Two local Vegeta runs were reported against a single wallet, each configured
-for 1,000 requests per second over 60 seconds with an operation amount of 1.
-The figures below are from those runs; hardware and container resource limits
-were not recorded.
-
-| Metric | Deposit run | Withdrawal run |
-|---|---:|---:|
-| Total requests | 60,000 | 60,000 |
-| Request rate | 1,000.02/s | 1,000.01/s |
-| Throughput, including final wait | 861.46/s | 874.47/s |
-| Successful responses | 100% (60,000 HTTP 200) | 100% (60,000 HTTP 200) |
-| Mean latency | 4.132s | 3.584s |
-| p50 latency | 4.073s | 3.496s |
-| p95 latency | 8.670s | 7.491s |
-| p99 latency | 9.490s | 8.334s |
-| Maximum latency | 9.876s | 8.869s |
-| Total duration | 69.649s | 68.613s |
-| Wait after request generation ended | 9.650s | 8.614s |
-
-The reported balance after the deposit run was exactly 60,000. With an initial
-balance of zero and amount=1, this matches all 60,000 successful deposits.
-
-The withdrawal target references `vegeta-minus-balance-body.json`, which uses
-WITHDRAW with amount=1. All 60,000 withdrawals returned HTTP 200. The starting
-balance was 120,000 and the confirmed final balance was 60,000, matching the
-60,000 successful withdrawals.
-
-These runs show that all 60,000 submitted requests received HTTP 200 responses
-at an offered rate of 1,000 requests/sec. Completion continued for roughly
-8–10 seconds after request generation stopped. They do not establish sustained
-1,000 requests/sec completion throughput or bounded latency over longer runs.
-
-Run the direct Vegeta commands below from `services/gw-currency-wallet/` with Vegeta installed and the API running.
-From the repository root, first run `cd services/gw-currency-wallet`.
-Set the wallet UUID in the request body files and adjust the target URL if needed.
-Add `Authorization: Bearer <token>` to each Vegeta target file, immediately after
-the request line, using a token from login. This is also required by the Make
-load-test targets. Do not commit real tokens. Without this header requests return 401:
+From the repository root (1,000 requests/sec for 30 seconds):
 
 ```bash
-vegeta attack -targets=./loadtests/vegeta_targets_add_balance.txt -rate=1000 -duration=60s | vegeta report
+export TOKEN
+make load-test-add-balance
+make load-test-get-balance
+make load-test-minus-balance
 ```
 
-For withdrawals, prepare a starting balance of at least 60,000:
+The Make targets require a nonempty `TOKEN`. Both operation body files use
+`{"currency":"USD","amount":0.01}`. A 30-second run submits about 30,000 operations,
+so a withdrawal run needs at least 300.00 USD if every request succeeds.
+Check the actual balance after deposits before starting withdrawals.
+
+For a custom duration, run from `services/gw-currency-wallet/`:
 
 ```bash
-vegeta attack -targets=./loadtests/vegeta_targets_minus_balance.txt -rate=1000 -duration=60s | vegeta report
+vegeta attack -targets=./loadtests/vegeta_targets_add_balance.txt \
+  -header="Authorization: Bearer $TOKEN" -rate=1000 -duration=60s | vegeta report
 ```
 
-The `make load-test-add-balance`, `make load-test-minus-balance`, and
-`make load-test-get-balance` shortcuts are run from the repository root and currently run for **30 seconds**.
-Use the explicit 60-second commands above to reproduce the duration in the results table.
-After each run, verify the final balance against the starting balance and successful operations.
+Adjust target URLs if the API uses a different address. A 60-second withdrawal
+run with the supplied amount needs at least 600.00 USD. Ensure the JWT remains
+valid throughout the run. Compare the final balance with the starting balance
+and successful operations; separately inspect any failed responses.
+
+Previous load measurements used the removed anonymous-wallet API and are not
+benchmarks for the current authenticated multicurrency API. No new load results
+are claimed here.

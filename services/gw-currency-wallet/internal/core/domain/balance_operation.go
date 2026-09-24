@@ -62,3 +62,14 @@ func (bOperation BalanceOperation) Amount() int64 {
 func (bOperation BalanceOperation) OperationType() OperationType {
 	return bOperation.operationType
 }
+
+type OperationType string
+
+const (
+	OperationTypeDeposit  OperationType = "deposit"
+	OperationTypeWithdraw OperationType = "withdraw"
+)
+
+func (operationType OperationType) IsEqual(other OperationType) bool {
+	return operationType == other
+}

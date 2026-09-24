@@ -3,11 +3,13 @@ package repository_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"wallet-app/internal/core/domain"
 	"wallet-app/internal/features/wallet/repository"
 )
@@ -132,6 +134,84 @@ func TestGetBalancesFailures(t *testing.T) {
 			}
 			if !tt.canceled && tt.queryErr == nil && !rows.closed {
 				t.Error("rows not closed")
+			}
+		})
+	}
+}
+
+type operationDB struct {
+	repository.DBTX
+	exec func(context.Context, string, ...any) (pgconn.CommandTag, error)
+	row  func(context.Context, string, ...any) pgx.Row
+}
+
+func (d operationDB) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	return d.exec(ctx, sql, args...)
+}
+func (d operationDB) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	return d.row(ctx, sql, args...)
+}
+
+type existenceRow struct {
+	exists bool
+	err    error
+}
+
+func (r existenceRow) Scan(dest ...any) error {
+	if r.err != nil {
+		return r.err
+	}
+	*dest[0].(*bool) = r.exists
+	return nil
+}
+
+func TestApplyBalanceOperationDatabaseErrors(t *testing.T) {
+	id := uuid.New()
+	currency, err := domain.NewCurrency(domain.CurrencyTypeEUR)
+	if err != nil {
+		t.Fatal(err)
+	}
+	op, err := domain.NewBalanceOperation(id, currency, domain.OperationTypeDeposit, 123)
+	if err != nil {
+		t.Fatal(err)
+	}
+	execErr := errors.New("update failed")
+	checkErr := errors.New("existence check failed")
+	for _, tt := range []struct {
+		name                     string
+		execErr, rowErr, wantErr error
+		affected                 int64
+		exists                   bool
+		wantChecks               int
+	}{
+		{name: "success", affected: 1},
+		{name: "update error", execErr: execErr, wantErr: execErr},
+		{name: "lookup error", rowErr: checkErr, wantErr: checkErr, wantChecks: 1},
+		{name: "missing balance", wantErr: domain.ErrBalanceNotFound, wantChecks: 1},
+		{name: "overflow", exists: true, wantErr: domain.ErrBalanceOverflow, wantChecks: 1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := t.Context()
+			execCalls, checks := 0, 0
+			db := operationDB{exec: func(c context.Context, _ string, args ...any) (pgconn.CommandTag, error) {
+				execCalls++
+				if c != ctx || len(args) != 3 || args[0] != int64(123) || args[1] != id.String() || args[2] != currency.CurrencyType() {
+					t.Error("incorrect update parameters")
+				}
+				return pgconn.NewCommandTag(fmt.Sprintf("UPDATE %d", tt.affected)), tt.execErr
+			}, row: func(c context.Context, _ string, args ...any) pgx.Row {
+				checks++
+				if c != ctx || len(args) != 2 || args[0] != id.String() || args[1] != currency.CurrencyType() {
+					t.Error("incorrect existence parameters")
+				}
+				return existenceRow{exists: tt.exists, err: tt.rowErr}
+			}}
+			err := repository.NewPostgresRepository(db).ApplyBalanceOperation(ctx, op)
+			if !errors.Is(err, tt.wantErr) {
+				t.Errorf("error=%v; want %v", err, tt.wantErr)
+			}
+			if execCalls != 1 || checks != tt.wantChecks {
+				t.Errorf("exec/check calls=%d/%d", execCalls, checks)
 			}
 		})
 	}
